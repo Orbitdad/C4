@@ -1,6 +1,5 @@
-# pyre-ignore-all-errors
 """
-C4 JARVIS HUI — Cinematic Holographic User Interface
+C4 HUI — Cinematic Holographic User Interface
 
 Major upgrades over original:
 - JARVIS speaking waveform visualizer
@@ -549,7 +548,7 @@ class HardwareSensorsHUD(QLabel):
 class HUIDashboard(QMainWindow):
 
     def __init__(self):
-        print("HUI: Initializing JARVIS C4 HUI...")
+        print("HUI: Initializing C4 HUI...")
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -598,10 +597,10 @@ class HUIDashboard(QMainWindow):
         self._current_jarvis_text = ""
 
         self.init_ui()
-        print("HUI: JARVIS C4 HUI Ready.")
+        print("HUI: C4 Core Ready.")
 
     def init_ui(self):
-        self.setWindowTitle("C4 JARVIS INTELLIGENCE SYSTEM")
+        self.setWindowTitle("C4 INTELLIGENCE SYSTEM")
         self.setGeometry(0, 0, 1600, 950)
 
         central_widget = QWidget()

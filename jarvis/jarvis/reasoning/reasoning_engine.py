@@ -99,6 +99,8 @@ class ReasoningEngine:
         self.dag_runner = None  # Set by main.py after DAGRunner is created
         self._pending_plan_commands: Optional[Dict[str, Any]] = None
         self._coding_jobs = InMemoryJobStore()
+        self._last_generated_code: Optional[str] = None
+
 
     def _get_dynamic_system_prompt(self) -> str:
         from jarvis.core.world_state import world
@@ -352,7 +354,14 @@ class ReasoningEngine:
             return self._handle_question(intent, context)
 
         # Write code
+        if intent.type == IntentType.WRITE_CODE_ACTIVE_WINDOW:
+            return self._handle_write_code_active_window(intent, context)
+
+        if intent.type == IntentType.PASTE_CODE:
+            return self._handle_paste_code(intent, context)
+
         if intent.type == IntentType.WRITE_CODE:
+
             return self._handle_write_code(intent, context)
 
         # Sense Gap / Skill Synthesis
@@ -1182,6 +1191,55 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             },
         )
 
+    def _handle_write_code_active_window(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
+        request = (intent.params.get("query") or intent.raw_text or "").strip()
+        if not request:
+            return ReasoningResponse(spoken_response="What code would you like me to insert here, sir?")
+            
+        voice = getattr(self, "_voice_output", None)
+        if voice:
+            import threading
+            threading.Thread(target=lambda: voice.speak_thinking("Writing code directly to active window, sir."), daemon=True).start()
+            
+        prompt = f"""You are the coder. The user wants you to write code directly into their current file based on this request: "{request}".
+        Provide ONLY the raw code text to be pasted. 
+        CRITICAL: Do NOT wrap the code in markdown blocks (like ```python or ```). Do NOT include any explanations or pleasantries. Output exactly what should be pasted."""
+        
+        code_text = self._run_role("coder", prompt, context=context)
+        
+        if not code_text or not code_text.strip():
+            return ReasoningResponse(spoken_response="I could not generate any code for that request, sir.")
+            
+        # Clean up markdown if the LLM hallucinated it anyway
+        if code_text.strip().startswith("```"):
+            lines = code_text.strip().splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            code_text = "\n".join(lines)
+            
+        self._last_generated_code = code_text # STORE IN BUFFER
+            
+        if self.executor:
+            # interval=0.01 provides a fast typing effect
+            self.executor.execute_step({"type": "keyboard_type", "text": code_text, "interval": 0.01})
+            return ReasoningResponse(spoken_response="I have generated the code and typed it into your current window, sir.")
+        else:
+            return ReasoningResponse(spoken_response="I was unable to type into the active window.")
+
+    def _handle_paste_code(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
+        if not self._last_generated_code:
+            return ReasoningResponse(spoken_response="I don't have any code buffered to type, sir. What would you like me to write?")
+            
+        try:
+            if self.executor:
+                self.executor.execute_step({"type": "keyboard_type", "text": self._last_generated_code, "interval": 0.01})
+                return ReasoningResponse(spoken_response="Typed, sir.")
+            return ReasoningResponse(spoken_response="I could not perform the type action.")
+        except Exception as e:
+            logger.error(f"[PasteCode] Error: {e}")
+            return ReasoningResponse(spoken_response="I'm afraid I encountered an error while typing, sir.")
 
 def _now_iso() -> str:
     from datetime import datetime, timezone

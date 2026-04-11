@@ -211,9 +211,9 @@ def run() -> None:
             except Exception:
                 pass
 
-        # JARVIS boot greeting
+        # C4 boot greeting
         pm = getattr(reasoning_engine, "personality_manager", None)
-        boot_msg = pm.get_greeting() if pm else "JARVIS online. Standing by, sir."
+        boot_msg = pm.get_greeting() if pm else "C4 intelligence online. Standing by, sir."
         voice_output.speak(boot_msg)
         if hui_window:
             try:

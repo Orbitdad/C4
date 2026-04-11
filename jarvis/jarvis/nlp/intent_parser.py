@@ -275,7 +275,7 @@ class IntentParser:
                 parsed_action="web_search",
                 params={"query": query},
             )
-        if any(q in lower for q in ["what do you see", "describe the environment", "visual status", "show me what you see"]) or ("screen" in lower and "look" in lower):
+        if any(q in lower for q in ["what do you see", "describe the environment", "visual status", "show me what you see"]) or ("look" in lower and "screen" in lower):
              return Intent(
                  type=IntentType.COMMAND,
                  raw_text=text,
@@ -305,6 +305,22 @@ class IntentParser:
                 parsed_action="cancel",
                 params={},
             )
+
+        if any(w in lower for q in ["paste code", "paste it", "write it here", "put it here", "paste the code"] for w in [q]):
+             return Intent(
+                 type=IntentType.PASTE_CODE,
+                 raw_text=text,
+                 parsed_action="paste_stored_code",
+             )
+
+        active_window_code_triggers = ["write code in the current file", "write code here", "type code", "code here", "in the current file", "on the screen", "type this code"]
+        if any(w in lower for q in active_window_code_triggers for w in [q]):
+             return Intent(
+                 type=IntentType.WRITE_CODE_ACTIVE_WINDOW,
+                 raw_text=text,
+                 parsed_action="generate_code_active",
+                 params={"query": text},
+             )
 
         if any(w in lower for q in ["write code", "generate code", "python script", "programming", "code for"] for w in [q]):
              return Intent(

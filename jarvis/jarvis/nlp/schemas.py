@@ -20,6 +20,8 @@ class IntentType(str, Enum):
     MEMORY_QUERY = "memory_query"
     CONTROL = "control"
     WRITE_CODE = "write_code"
+    WRITE_CODE_ACTIVE_WINDOW = "write_code_active_window"
+    PASTE_CODE = "paste_code"
     SENSE_GAP = "sense_gap"   # Phase 10: capability gap — trigger SkillSynthesizer
     UNKNOWN = "unknown"
 
