@@ -28,7 +28,7 @@ voice:
 llm:
   provider: "ollama"
   ollama_host: "http://localhost:11434"
-  max_tokens: 2048
+  max_tokens: 4096
   default_role: "explainer"
   embed_model: "nomic-embed-text"
   roles:
@@ -37,21 +37,25 @@ llm:
       options:
         temperature: 0.2
         num_ctx: 4096
+        num_predict: 4096
     coder:
-      model: "codeqwen"
+      model: "deepseek-coder"
       options:
         temperature: 0.15
         num_ctx: 8192
+        num_predict: 8192
     debugger:
       model: "deepseek-coder"
       options:
         temperature: 0.1
         num_ctx: 8192
+        num_predict: 8192
     explainer:
       model: "llama3.2"
       options:
         temperature: 0.3
         num_ctx: 4096
+        num_predict: 2048
 
 memory:
   base_dir: "data/memory"

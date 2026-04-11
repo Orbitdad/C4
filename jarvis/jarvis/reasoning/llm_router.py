@@ -97,7 +97,25 @@ class RoleBasedLLM:
         history: Optional[List[Dict[str, str]]] = None,
         model_override: Optional[str] = None,
         options_override: Optional[Dict[str, Any]] = None,
+        provider_override: Optional[str] = None,
     ) -> str:
+        prompt_lower = prompt.lower()
+        
+        # Strict routing logic
+        coder_kws = ["create file", "write code", "generate module", "build api", "fix error", "debug"]
+        planner_kws = ["plan", "architecture", "structure", "design system"]
+        
+        effective_provider = provider_override
+        if any(kw in prompt_lower for kw in coder_kws):
+            role = "coder"
+            effective_provider = "ollama"
+        elif any(kw in prompt_lower for kw in planner_kws):
+            role = "planner"
+            effective_provider = "ollama"
+        else:
+            role = "global"
+            effective_provider = "gemini"
+            
         spec = self._roles.get(role) or self._roles.get(self._default_role)
         model = model_override or (spec.model if spec else None)
 
@@ -115,5 +133,6 @@ class RoleBasedLLM:
             history=history,
             model=model,
             options=options if options else None,
+            provider_override=effective_provider,
         )
 

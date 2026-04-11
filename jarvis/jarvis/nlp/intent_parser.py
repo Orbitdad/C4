@@ -313,12 +313,21 @@ class IntentParser:
                  parsed_action="paste_stored_code",
              )
 
-        active_window_code_triggers = ["write code in the current file", "write code here", "type code", "code here", "in the current file", "on the screen", "type this code"]
+        active_window_code_triggers = ["write code in the current file", "write code here", "type code", "code here", "in the current file", "in the current window", "current window", "on the screen", "type this code"]
         if any(w in lower for q in active_window_code_triggers for w in [q]):
              return Intent(
                  type=IntentType.WRITE_CODE_ACTIVE_WINDOW,
                  raw_text=text,
                  parsed_action="generate_code_active",
+                 params={"query": text},
+             )
+
+        active_window_edit_triggers = ["edit code in the current file", "change this code", "update the current file", "modify code", "edit the current file", "edit this code", "edit code here", "change code here"]
+        if any(w in lower for q in active_window_edit_triggers for w in [q]):
+             return Intent(
+                 type=IntentType.EDIT_CODE_ACTIVE_WINDOW,
+                 raw_text=text,
+                 parsed_action="edit_code_active",
                  params={"query": text},
              )
 

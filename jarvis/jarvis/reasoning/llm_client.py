@@ -70,9 +70,11 @@ class LLMClient:
         history: Optional[List[Dict[str, str]]] = None,
         model: Optional[str] = None,
         options: Optional[Dict[str, Any]] = None,
+        provider_override: Optional[str] = None,
     ) -> str:
         """Generate a completion using the configured provider."""
-        if self.provider == "ollama":
+        effective_provider = provider_override or self.provider
+        if effective_provider == "ollama":
             return self._generate_ollama(prompt, system_message, history, model=model, options=options)
         return self._generate_gemini(prompt, system_message, history, model=model)
 
@@ -146,7 +148,8 @@ class LLMClient:
                 "temperature": 0.3,
                 "top_k": 40,
                 "top_p": 0.9,
-                "num_ctx": 2048
+                "num_ctx": 2048,
+                "num_predict": self.max_tokens # Map max_tokens to num_predict
             }
             if options:
                 base_options.update({k: v for k, v in options.items() if v is not None})

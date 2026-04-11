@@ -47,7 +47,13 @@ Rules:
 - Use relative paths. Do not use absolute paths.
 - Prefer "update" for existing files, "create" for missing.
 - Use "patch" only if a small localized change is sufficient; otherwise use "update".
-- For React Vite apps: include package.json, index.html, vite config, src/main, src/App, routing/login page/components, minimal styles.
+- STACK PREFERENCE: 
+    - For simple web requests, prefer Vanilla HTML, CSS, and Javascript (beginner friendly).
+    - Use React/Vite ONLY if explicitly asked or for complex stateful applications.
+- DESIGN STANDARDS:
+    - All web projects must use a premium, modern design system.
+    - Include vibrant colors, glassmorphism, smooth gradients, and micro-animations.
+    - Use Google Fonts (e.g., Inter, Roboto, Outfit) instead of browser defaults.
 - Keep file list complete enough that the project can run after commands.
 
 Request:
@@ -66,6 +72,13 @@ Output rules (STRICT):
 - Output ONLY the file content. No markdown fences. No commentary.
 - The content must be complete and syntactically valid.
 - Preserve project conventions from the provided context.
+- BEGINNER FRIENDLY: Use clean, well-commented code. Avoid overly complex abstractions.
+- CODE QUALITY (CRITICAL): You MUST output the absolute BEST, most optimal, advanced but structurally readable code. Implement comprehensive error handling, modularity, and follow modern best practices perfectly.
+- DESIGN AESTHETICS (CRITICAL):
+    - Use rich aesthetics: vibrant colors, sleak dark modes, glassmorphism.
+    - Prioritize Visual Excellence: Use curated color palettes (HSL), modern typography (Inter/Outfit).
+    - Add smooth gradients and subtle micro-animations for interactions.
+    - The design should feel "Premium" and "State of the Art".
 
 Target file JSON:
 {file_spec_json}
@@ -88,6 +101,7 @@ Output rules (STRICT):
 - Output ONLY the full updated file content. No markdown fences. No commentary.
 - Keep unrelated code unchanged as much as possible.
 - Ensure imports compile and formatting is consistent.
+- CODE QUALITY (CRITICAL): Ensure the modified code meets the highest standards. Implement robust error handling, edge-case protection, and best practices seamlessly into the existing structure.
 
 Request:
 {request}

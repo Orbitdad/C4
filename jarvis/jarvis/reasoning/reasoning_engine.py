@@ -61,6 +61,7 @@ CRITICAL RULES:
 - NEVER say "Great question!" or any sycophantic filler.
 - NEVER respond with more than 3 sentences unless explicitly asked for detail.
 - If unsure: "I want to be certain before acting on that, sir. Could you clarify [X]?"
+- CODING STYLE: Prioritize clean, beginner-friendly, and visually stunning code. Avoid over-engineering or complex build steps for simple web tasks. You MUST write the BEST, most optimal, advanced but structurally readable code. Use comprehensive error handling and best practices ALWAYS.
 
 EXECUTION:
   Example: "open VS Code and Chrome" -> [{"type":"open_app","app":"code"},{"type":"open_app","app":"chrome"}].
@@ -357,6 +358,9 @@ class ReasoningEngine:
         if intent.type == IntentType.WRITE_CODE_ACTIVE_WINDOW:
             return self._handle_write_code_active_window(intent, context)
 
+        if intent.type == IntentType.EDIT_CODE_ACTIVE_WINDOW:
+            return self._handle_edit_code_active_window(intent, context)
+
         if intent.type == IntentType.PASTE_CODE:
             return self._handle_paste_code(intent, context)
 
@@ -646,18 +650,20 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
         return None
 
 
-    def _run_role(self, role: str, prompt: str, context: Optional[ConversationContext] = None, system_message: Optional[str] = None) -> str:
+    def _run_role(self, role: str, prompt: str, context: Optional[ConversationContext] = None, system_message: Optional[str] = None, provider_override: Optional[str] = None) -> str:
         if hasattr(self.llm, "call_llm"):
             return self.llm.call_llm(
                 role=role,
                 prompt=prompt,
                 system_message=system_message or self._get_dynamic_system_prompt(),
                 history=context.to_prompt_history() if context else None,
+                provider_override=provider_override,
             )
         return self.llm.generate(
             prompt,
             system_message=system_message or self._get_dynamic_system_prompt(),
             history=context.to_prompt_history() if context else None,
+            provider_override=provider_override,
         )
 
     def _is_destructive_command(self, cmd: str) -> bool:
@@ -947,6 +953,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
         errors: List[Dict[str, Any]],
         workspace_root: str,
         context: ConversationContext,
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         from jarvis.reasoning.prompts import DEBUG_FIX_ERRORS_PROMPT, DEBUG_UNIFIED_DIFF_PROMPT, FILE_MODIFY_FULL_REWRITE_PROMPT
         from pathlib import Path
@@ -957,7 +964,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             errors_json=json.dumps(errors, indent=2),
             context_bundle=json.dumps(context_bundle, indent=2),
         )
-        decision_raw = self._run_role("debugger", debug_prompt, context=context)
+        decision_raw = self._run_role("debugger", debug_prompt, context=context, provider_override=provider_override)
         try:
             decision = json.loads((decision_raw or "").strip())
         except Exception:
@@ -982,7 +989,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
                 context_bundle=json.dumps(context_bundle, indent=2),
                 existing_file=existing_file,
             )
-            diff = self._run_role("debugger", patch_prompt, context=context)
+            diff = self._run_role("debugger", patch_prompt, context=context, provider_override=provider_override)
             if not diff.strip():
                 return {"changed": False, "message": "empty_patch"}
             patch_res = self.executor.execute_step({"type": "patch_file", "path": target_abs, "diff": diff})
@@ -995,7 +1002,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             context_bundle=json.dumps(context_bundle, indent=2),
             existing_file=existing_file,
         )
-        new_content = self._run_role("debugger", rewrite_prompt, context=context)
+        new_content = self._run_role("debugger", rewrite_prompt, context=context, provider_override=provider_override)
         if not new_content.strip() or new_content.strip() == existing_file.strip():
             return {"changed": False, "message": "no_meaningful_diff"}
         rewrite_res = self.executor.execute_step({"type": "update_file", "path": target_abs, "content": new_content})
@@ -1085,6 +1092,16 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             if not errors:
                 break
             self._coding_jobs.update_status(job.job_id, "fixing", "debug")
+            
+            provider_override = None
+            if loop_count >= 2:
+                provider_override = "gemini"
+                if context:
+                    from jarvis.core.world_state import world
+                    world.set_temporal_context("high complexity", True)
+                    context.last_action = context.last_action or {}
+                    context.last_action["high_complexity"] = True
+
             loop_count += 1
             signature = fingerprint_errors(errors)
             if signature in previous_signatures or not self._coding_jobs.add_error_fingerprint(job.job_id, signature):
@@ -1100,6 +1117,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
                     errors=errors,
                     workspace_root=str(workspace_root),
                     context=context,
+                    provider_override=provider_override,
                 )
                 if not fix.get("changed"):
                     break
@@ -1114,6 +1132,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
                         errors=[e for e in errors if (e.get("file") or "").replace("\\", "/") == file_path] or errors,
                         workspace_root=str(workspace_root),
                         context=context,
+                        provider_override=provider_override,
                     )
                     if one_fix.get("changed"):
                         changed_any = True
@@ -1227,6 +1246,72 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             return ReasoningResponse(spoken_response="I have generated the code and typed it into your current window, sir.")
         else:
             return ReasoningResponse(spoken_response="I was unable to type into the active window.")
+
+    def _handle_edit_code_active_window(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
+        import time
+        try:
+            import pyperclip
+        except ImportError:
+            return ReasoningResponse(spoken_response="The clipboard module is missing, sir. I cannot edit the code.")
+            
+        request = (intent.params.get("query") or intent.raw_text or "").strip()
+        if not request:
+            return ReasoningResponse(spoken_response="What would you like me to change in this file, sir?")
+            
+        voice = getattr(self, "_voice_output", None)
+        if voice:
+            import threading
+            threading.Thread(target=lambda: voice.speak_thinking("Reading current file to make your changes, sir."), daemon=True).start()
+            
+        if not self.executor:
+            return ReasoningResponse(spoken_response="I cannot access the keyboard to retrieve the file contents.")
+            
+        # 1. Grab file content via clipboard
+        self.executor.execute_step({"type": "keyboard_hotkey", "keys": ["ctrl", "a"]})
+        time.sleep(0.1)
+        self.executor.execute_step({"type": "keyboard_hotkey", "keys": ["ctrl", "c"]})
+        time.sleep(0.2)
+        
+        current_code = pyperclip.paste()
+        
+        if not current_code or not current_code.strip():
+            return ReasoningResponse(spoken_response="The current file appears to be empty or I couldn't read it, sir.")
+            
+        if voice:
+             import threading
+             threading.Thread(target=lambda: voice.speak_thinking("Writing the updated code, sir."), daemon=True).start()
+        
+        prompt = f"""You are the C4 Coder. The user wants you to modify the code in their active window based on this request: "{request}".
+        
+EXISTING CODE:
+{current_code}
+        
+Output the FULL modified code to replace the original. 
+CRITICAL: Do NOT wrap the code in markdown blocks (like ```python or ```). Do NOT include any explanations or pleasantries. Output exactly what should be pasted back to replace the entire file."""
+        
+        modified_code = self._run_role("coder", prompt, context=context)
+        
+        if not modified_code or not modified_code.strip():
+            return ReasoningResponse(spoken_response="I could not generate the modified code, sir.")
+            
+        # Clean up markdown if the LLM hallucinated it anyway
+        if modified_code.strip().startswith("```"):
+            lines = modified_code.strip().splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            modified_code = "\n".join(lines)
+            
+        self._last_generated_code = modified_code
+        
+        pyperclip.copy(modified_code)
+        time.sleep(0.1)
+        self.executor.execute_step({"type": "keyboard_hotkey", "keys": ["ctrl", "a"]})
+        time.sleep(0.1)
+        self.executor.execute_step({"type": "keyboard_hotkey", "keys": ["ctrl", "v"]})
+        
+        return ReasoningResponse(spoken_response="I have modified the code in your current window, sir.")
 
     def _handle_paste_code(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
         if not self._last_generated_code:
