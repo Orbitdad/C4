@@ -96,7 +96,7 @@ class EdgeTTSOutput(VoiceOutput):
             return
         try:
             if message:
-                self.hui_window.signals.log_message.emit(f"JARVIS: {message}")
+                self.hui_window.signals.log_message.emit(f"C4: {message}")
             self.hui_window.signals.update_status.emit(status)
         except Exception:
             pass
@@ -272,7 +272,7 @@ class ElevenLabsOutput(VoiceOutput):
             return
         try:
             if message:
-                self.hui_window.signals.log_message.emit(f"JARVIS: {message}")
+                self.hui_window.signals.log_message.emit(f"C4: {message}")
             self.hui_window.signals.update_status.emit(status)
         except Exception:
             pass
@@ -385,7 +385,7 @@ class Pyttsx3Output(VoiceOutput):
                 self._is_speaking = True
                 if self.hui_window:
                     try:
-                        self.hui_window.signals.log_message.emit(f"JARVIS: {text}")
+                        self.hui_window.signals.log_message.emit(f"C4: {text}")
                         self.hui_window.signals.update_status.emit("Speaking...")
                     except Exception:
                         pass

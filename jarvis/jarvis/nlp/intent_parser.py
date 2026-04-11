@@ -227,7 +227,7 @@ class IntentParser:
                 params={"query": query},
             )
             
-        if any(w in lower for w in ["time", "what time", "current time"]):
+        if any(re.search(rf"\b{w}\b", lower) for w in ["time", "what time", "current time"]):
             return Intent(
                 type=IntentType.COMMAND,
                 raw_text=text,
@@ -235,7 +235,7 @@ class IntentParser:
                 params={},
             )
             
-        if any(w in lower for w in ["date", "what date", "today"]):
+        if any(re.search(rf"\b{w}\b", lower) for w in ["date", "what date", "today"]):
             return Intent(
                 type=IntentType.COMMAND,
                 raw_text=text,
@@ -275,14 +275,14 @@ class IntentParser:
                 parsed_action="web_search",
                 params={"query": query},
             )
-        if any(q in lower for q in ["what do you see", "describe the environment", "visual status", "show me what you see"]):
+        if any(q in lower for q in ["what do you see", "describe the environment", "visual status", "show me what you see"]) or ("screen" in lower and "look" in lower):
              return Intent(
                  type=IntentType.COMMAND,
                  raw_text=text,
                  parsed_action="visual_status",
                  params={},
              )
-        if any(w in lower for w in ["exit", "quit", "goodbye", "shut down", "stop"]):
+        if any(re.search(rf"\b{w}\b", lower) for w in ["exit", "quit", "goodbye", "shut down", "stop"]):
             return Intent(
                 type=IntentType.CONTROL,
                 raw_text=text,
@@ -315,7 +315,7 @@ class IntentParser:
              )
 
         # Weather
-        if any(w in lower for w in ["weather", "temperature", "forecast", "how hot", "how cold", "raining", "climate"]):
+        if any(re.search(rf"\b{w}\b", lower) for w in ["weather", "temperature", "forecast", "how hot", "how cold", "raining", "climate"]):
             return Intent(
                 type=IntentType.COMMAND,
                 raw_text=text,
@@ -333,7 +333,7 @@ class IntentParser:
             )
 
         # Volume
-        if any(w in lower for w in ["volume", "mute", "unmute", "louder", "quieter", "turn up", "turn down"]):
+        if any(re.search(rf"\b{w}\b", lower) for w in ["volume", "mute", "unmute", "louder", "quieter", "turn up", "turn down"]):
             return Intent(
                 type=IntentType.COMMAND,
                 raw_text=text,

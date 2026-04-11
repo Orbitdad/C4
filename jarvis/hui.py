@@ -173,7 +173,7 @@ class TranscriptPanel(QFrame):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._text.append(
             f"<span style='color:#888888'>[{ts}]</span> "
-            f"<span style='color:#00d2ff; font-weight:bold'>JARVIS:</span> "
+            f"<span style='color:#00d2ff; font-weight:bold'>C4:</span> "
             f"<span style='color:#aaeeff'>{text}</span>"
         )
         self._text.verticalScrollBar().setValue(self._text.verticalScrollBar().maximum())
@@ -797,7 +797,7 @@ class HUIDashboard(QMainWindow):
         log_layout.addWidget(self.transcript_panel)
 
         # Explanation line
-        self.explain_label = QLabel("JARVIS :: Awaiting instruction...")
+        self.explain_label = QLabel("C4 :: Awaiting instruction...")
         self.explain_label.setStyleSheet("color: #ffcc00; font-size: 12px; font-style: italic;")
         self.explain_label.setWordWrap(True)
         log_layout.addWidget(self.explain_label)
@@ -898,7 +898,7 @@ class HUIDashboard(QMainWindow):
     def _on_speaking_started(self, text: str):
         self.waveform.set_active(True)
         self.status_orb.set_mode("speaking")
-        self.explain_label.setText(f"JARVIS: {text[:120]}")
+        self.explain_label.setText(f"C4: {text[:120]}")
         self.ai_status_label.setStyleSheet("color: #00d2ff; font-size: 10px;")
 
     def _on_speaking_stopped(self):
@@ -908,7 +908,7 @@ class HUIDashboard(QMainWindow):
 
     def _on_thinking_started(self):
         self.status_orb.set_mode("thinking")
-        self.explain_label.setText("JARVIS: Processing...")
+        self.explain_label.setText("C4: Processing...")
         self.ai_status_label.setText("STATUS: THINKING...")
         self.ai_status_label.setStyleSheet("color: #ffcc00; font-size: 10px;")
 
@@ -1087,7 +1087,7 @@ class HUIDashboard(QMainWindow):
             from jarvis.core.world_state import world
             explain = world.get_snapshot().get("temporal_context", {}).get("last_fusion_explanation")
             if explain:
-                self.explain_label.setText(f"JARVIS: {explain}")
+                self.explain_label.setText(f"C4: {explain}")
         except ImportError:
             pass
 
