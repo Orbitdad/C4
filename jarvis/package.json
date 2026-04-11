@@ -1,0 +1,12 @@
+{
+  "name": "jarvis",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.py",
+  "scripts": {
+    "start": "python src/main.py"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {}
+}

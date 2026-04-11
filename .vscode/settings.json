@@ -1,0 +1,10 @@
+{
+  "python.analysis.extraPaths": [
+    "./jarvis"
+  ],
+  "python.defaultInterpreterPath": "C:\\Users\\manda\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingModuleSource": "none",
+    "reportMissingImports": "none"
+  }
+}

@@ -1,0 +1,274 @@
+# ─────────────────────────────────────────────────────────────────
+#  JARVIS Gesture Macros
+#  Edit this file to add / modify gesture sequences.
+#
+#  Schema per macro:
+#    name:        Human-readable label (used in logs / HUI)
+#    sequence:    Ordered list of gesture tokens that must match
+#    context:     "any" | "media" | "browser" | "editor" | "terminal" | "3d"
+#    mode:        "HOTKEY" | "3D" | "ANY" (default "HOTKEY")
+#    priority:    Integer, higher overrides lower (default 0)
+#    cooldown_ms: Delay in ms between triggers (default 500)
+#    actions:     List of action dicts (executed in order)
+#
+#  Action types:
+#    hotkey  – pyautogui.hotkey(*keys)
+#    key     – pyautogui.press(key)
+#    click   – pyautogui.click()
+#    scroll  – pyautogui.scroll(amount)
+#    open    – subprocess.Popen(app)
+#    bus     – publish SystemEvent(name, data)
+# ─────────────────────────────────────────────────────────────────
+
+macros:
+
+  # ── System Control (Universal) ─────────────────────────────────
+  - name: "Activate 3D Mode"
+    sequence: ["OPEN_PALM", "CIRCLE"]
+    context: "any"
+    mode: "HOTKEY"
+    priority: 100
+    actions:
+      - type: bus
+        event: "gesture.action"
+        data: { "type": "SWITCH_MODE", "mode": "HOLOGRAM_3D_MODE" }
+
+  - name: "Exit 3D Mode"
+    sequence: ["OPEN_PALM", "FIST"]
+    context: "any"
+    mode: "3D"
+    priority: 100
+    actions:
+      - type: bus
+        event: "gesture.action"
+        data: { "type": "SWITCH_MODE", "mode": "HOTKEY_MODE" }
+
+  - name: "Pause JARVIS"
+    sequence: ["FIST"]
+    context: "any"
+    mode: "ANY"
+    priority: 90
+    actions:
+      - type: bus
+        event: "jarvis.pause"
+        data: {}
+
+  - name: "Screenshot"
+    sequence: ["OPEN_PALM", "PINCH"]
+    context: "any"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: hotkey
+        keys: ["win", "shift", "s"]
+
+  # ── Navigation / Universal ─────────────────────────────────────
+  - name: "Undo"
+    sequence: ["SWIPE_LEFT"]
+    context: "any"
+    mode: "HOTKEY"
+    priority: 0
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "z"]
+
+  - name: "Redo"
+    sequence: ["SWIPE_RIGHT"]
+    context: "any"
+    mode: "HOTKEY"
+    priority: 0
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "y"]
+
+  # ── Media ──────────────────────────────────────────────────────
+  - name: "Play / Pause"
+    sequence: ["PINCH"]
+    context: "media"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: key
+        key: "space"
+
+  - name: "Volume Up"
+    sequence: ["SWIPE_UP"]
+    context: "media"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "up"]
+
+  - name: "Volume Down"
+    sequence: ["SWIPE_DOWN"]
+    context: "media"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "down"]
+
+  - name: "Next Track"
+    sequence: ["SWIPE_RIGHT"]
+    context: "media"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "right"]
+
+  - name: "Previous Track"
+    sequence: ["SWIPE_LEFT"]
+    context: "media"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "left"]
+
+  # ── Browser ────────────────────────────────────────────────────
+  - name: "New Tab"
+    sequence: ["OPEN_PALM", "SWIPE_RIGHT"]
+    context: "browser"
+    mode: "HOTKEY"
+    priority: 20
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "t"]
+
+  - name: "Close Tab"
+    sequence: ["OPEN_PALM", "SWIPE_LEFT"]
+    context: "browser"
+    mode: "HOTKEY"
+    priority: 20
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "w"]
+
+  - name: "Back"
+    sequence: ["SWIPE_LEFT"]
+    context: "browser"
+    mode: "HOTKEY"
+    priority: 15
+    actions:
+      - type: hotkey
+        keys: ["alt", "left"]
+
+  - name: "Forward"
+    sequence: ["SWIPE_RIGHT"]
+    context: "browser"
+    mode: "HOTKEY"
+    priority: 15
+    actions:
+      - type: hotkey
+        keys: ["alt", "right"]
+
+  - name: "Refresh"
+    sequence: ["CIRCLE"]
+    context: "browser"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: key
+        key: "f5"
+
+  # ── Editor (VSCode) ────────────────────────────────────────────
+  - name: "Command Palette"
+    sequence: ["OPEN_PALM", "PINCH"]
+    context: "editor"
+    mode: "HOTKEY"
+    priority: 20
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "shift", "p"]
+
+  - name: "Toggle Terminal"
+    sequence: ["SWIPE_DOWN"]
+    context: "editor"
+    mode: "HOTKEY"
+    priority: 15
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "`"]
+
+  - name: "Comment Line"
+    sequence: ["CIRCLE"]
+    context: "editor"
+    mode: "HOTKEY"
+    priority: 15
+    actions:
+      - type: hotkey
+        keys: ["ctrl", "/"]
+
+  # ── 3D / CAD (Blender) ─────────────────────────────────────────
+  - name: "Orbit Camera Left"
+    sequence: ["ROTATE_LEFT"]
+    context: "3d"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: key
+        key: "numpad4"
+
+  - name: "Orbit Camera Right"
+    sequence: ["ROTATE_RIGHT"]
+    context: "3d"
+    mode: "HOTKEY"
+    priority: 10
+    actions:
+      - type: key
+        key: "numpad6"
+
+  - name: "Reset 3D View"
+    sequence: ["CIRCLE"]
+    context: "3d"
+    mode: "3D"
+    priority: 20
+    actions:
+      - type: bus
+        event: "3d.command"
+        data: { "action": "RESET_VIEW" }
+
+# ── Context keyword → app-type mapping ────────────────────────
+#  Used by ContextEngine to classify the active window.
+app_keywords:
+  media:
+    - vlc
+    - spotify
+    - netflix
+    - youtube
+    - mpv
+    - windows media player
+    - music
+  browser:
+    - chrome
+    - firefox
+    - edge
+    - brave
+    - opera
+    - safari
+    - browser
+  editor:
+    - vscode
+    - code
+    - visual studio
+    - pycharm
+    - intellij
+    - sublime
+    - notepad++
+    - vim
+    - nvim
+  terminal:
+    - cmd
+    - powershell
+    - windows terminal
+    - bash
+    - zsh
+    - terminal
+  3d:
+    - blender
+    - unity
+    - unreal editor
+    - autocad
+    - fusion 360

@@ -1,0 +1,43 @@
+app:
+  name: "JARVIS Self-Learning Assistant"
+  locale: "en-US"
+  dry_run: true
+
+voice:
+  input:
+    backend: "speech_recognition"
+    energy_threshold: 300
+    pause_threshold: 0.8
+  output:
+    backend: "pyttsx3"
+    rate: 180
+    volume: 0.9
+    voice_name: "JARVIS"
+
+llm:
+  # provider: Choose "gemini" or "ollama"
+  provider: "gemini"
+  model: "gemini-1.5-flash" # or "llama3.2" for ollama
+  api_key_env: "GEMINI_API_KEY"
+  max_tokens: 2048
+  ollama_host: "http://localhost:11434"
+
+memory:
+  base_dir: "data/memory"
+  enabled: true
+
+learning:
+  enabled: true
+  suggest_automation: true
+  min_pattern_support: 3
+
+safety:
+  dry_run: false
+  confirm_deletes: true
+  require_confirmation_for_delete: true
+
+logging:
+  level: "INFO"
+  file: "logs/jarvis.log"
+  learning_file: "logs/learning.log"
+

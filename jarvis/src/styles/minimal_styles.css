@@ -1,0 +1,18 @@
+The task is to create a new file named "minimal_styles.css" in the directory "src/styles" with the purpose of providing minimal styles for the project. The file should be created and its path should be "src/styles/minimal_styles.css".
+
+Here's the content of the file:
+```css
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+}
+
+h1 {
+  color: #333;
+}
+
+p {
+  color: #666;
+}
+```
