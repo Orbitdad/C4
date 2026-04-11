@@ -85,9 +85,12 @@ class LLMClient:
         if self.provider == "ollama":
             try:
                 client = self._get_ollama_client()
-                response = client.embeddings(model=model or self.model, prompt=text)
-                return response.get("embedding", [])
-            except Exception as e:
+                # Ollama SDK >= 0.2: use embed() which maps to POST /api/embed
+                response = client.embed(model=model or self.model, input=text)
+                # Response schema: {"embeddings": [[...]]}
+                embeddings = response.get("embeddings") or []
+                return embeddings[0] if embeddings else []
+            except Exception:
                 return []
         else:
             try:
@@ -97,7 +100,7 @@ class LLMClient:
                     content=text
                 )
                 return result.get("embedding", [])
-            except Exception as e:
+            except Exception:
                 return []
 
     def _generate_gemini(
@@ -145,7 +148,7 @@ class LLMClient:
 
             # Optimize for near-zero latency
             base_options: Dict[str, Any] = {
-                "temperature": 0.3,
+                "temperature": 0.2,
                 "top_k": 40,
                 "top_p": 0.9,
                 "num_ctx": 2048,

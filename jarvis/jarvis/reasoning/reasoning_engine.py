@@ -848,7 +848,10 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
         workspace_root: Any,
         context: ConversationContext,
     ) -> Optional[str]:
-        from jarvis.reasoning.prompts import FILE_GENERATION_PROMPT, FILE_MODIFY_FULL_REWRITE_PROMPT, FILE_MODIFY_UNIFIED_DIFF_PROMPT
+        from jarvis.reasoning.prompts import (
+            FILE_GENERATION_PROMPT, FILE_MODIFY_FULL_REWRITE_PROMPT,
+            FILE_MODIFY_UNIFIED_DIFF_PROMPT, C4_WEB_DESIGN_SYSTEM,
+        )
         from pathlib import Path
         rel_path = (f.get("path") or "").strip()
         mode = (f.get("mode") or "create").strip().lower()
@@ -863,13 +866,16 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             existing_text = Path(abs_path).read_text(encoding="utf-8", errors="replace")
             if mode == "patch":
                 prompt = FILE_MODIFY_UNIFIED_DIFF_PROMPT.format(
-                    request=request, path=rel_path, project_plan_json=plan_json, context_bundle=bundle_json, existing_file=existing_text
+                    request=request, path=rel_path, project_plan_json=plan_json,
+                    context_bundle=bundle_json, existing_file=existing_text
                 )
                 diff = self._run_role("coder", prompt, context=context)
                 res = self.executor.execute_step({"type": "patch_file", "path": str(abs_path), "diff": diff})
                 if not res.get("success"):
                     prompt = FILE_MODIFY_FULL_REWRITE_PROMPT.format(
-                        request=request, path=rel_path, project_plan_json=plan_json, context_bundle=bundle_json, existing_file=existing_text
+                        request=request, path=rel_path, project_plan_json=plan_json,
+                        context_bundle=bundle_json, existing_file=existing_text,
+                        design_system=C4_WEB_DESIGN_SYSTEM,
                     )
                     rewritten = self._run_role("coder", prompt, context=context)
                     res = self.executor.execute_step({"type": "update_file", "path": str(abs_path), "content": rewritten})
@@ -877,7 +883,9 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
                     return f"updated {rel_path}"
                 return None
             prompt = FILE_MODIFY_FULL_REWRITE_PROMPT.format(
-                request=request, path=rel_path, project_plan_json=plan_json, context_bundle=bundle_json, existing_file=existing_text
+                request=request, path=rel_path, project_plan_json=plan_json,
+                context_bundle=bundle_json, existing_file=existing_text,
+                design_system=C4_WEB_DESIGN_SYSTEM,
             )
             rewritten = self._run_role("coder", prompt, context=context)
             res = self.executor.execute_step({"type": "update_file", "path": str(abs_path), "content": rewritten})
@@ -888,6 +896,7 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             file_spec_json=file_spec_json,
             project_plan_json=plan_json,
             context_bundle=bundle_json,
+            design_system=C4_WEB_DESIGN_SYSTEM,
         )
         content = self._run_role("coder", prompt, context=context)
         res = self.executor.execute_step({"type": "create_file", "path": str(abs_path), "content": content})
@@ -1185,6 +1194,11 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
             self._coding_jobs.update_status(job.job_id, "completed", "complete")
             spoken = "Generation and validation complete, sir."
 
+        # ── Fix 4: HTML Quality Validator ─────────────────────────────────────
+        project_type = (plan.get("project") or {}).get("type", "").lower()
+        if project_type == "web" and not final_errors:
+            self._run_html_quality_check(executed, workspace_root, plan, context)
+
         explain = self._run_role(
             "explainer",
             f"Summarize in 1-2 sentences. Files: {executed}. Debug actions: {debug_actions}. Remaining errors: {final_errors[:3]}",
@@ -1192,6 +1206,12 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
         )
         if explain and not explain.startswith("[Error"):
             spoken = explain.strip()
+
+        # ── Fix 5: Live Preview ───────────────────────────────────────────────
+        if project_type == "web":
+            preview_url = self._launch_preview(str(workspace_root))
+            if preview_url:
+                spoken = f"{spoken} Your site is live at {preview_url}, sir."
 
         return ReasoningResponse(
             spoken_response=spoken,
@@ -1209,6 +1229,113 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
                 }
             },
         )
+
+    # ── Fix 4: HTML Quality Validator ─────────────────────────────────────────
+
+    def _run_html_quality_check(
+        self,
+        executed: List[str],
+        workspace_root: Any,
+        plan: Dict[str, Any],
+        context: Any,
+    ) -> None:
+        """Post-generation quality gate for HTML files. Auto-rewrites if score < 75."""
+        from pathlib import Path
+        from jarvis.reasoning.prompts import (
+            WEBSITE_QUALITY_CHECK_PROMPT, FILE_MODIFY_FULL_REWRITE_PROMPT, C4_WEB_DESIGN_SYSTEM
+        )
+        html_files = [
+            item.replace("created ", "").replace("updated ", "")
+            for item in executed
+            if item.endswith(".html")
+        ]
+        if not html_files:
+            return
+        for rel in html_files[:2]:  # Check at most 2 HTML files
+            abs_path = Path(workspace_root) / rel
+            if not abs_path.is_file():
+                continue
+            try:
+                html_content = abs_path.read_text(encoding="utf-8", errors="replace")[:8000]
+            except Exception:
+                continue
+            qa_prompt = WEBSITE_QUALITY_CHECK_PROMPT.format(
+                html_content=html_content, rel_path=rel
+            )
+            qa_raw = self._run_role("debugger", qa_prompt, context=context)
+            try:
+                qa = json.loads((qa_raw or "").strip())
+            except Exception:
+                logger.debug(f"[QA] Could not parse QA response for {rel}")
+                continue
+            score = int(qa.get("score") or 0)
+            passed = bool(qa.get("pass", score >= 75))
+            logger.info(f"[QA] {rel} score={score} pass={passed} issues={qa.get('issues', [])}")
+            if passed:
+                continue
+            # Auto-rewrite with improvements
+            improvements = (qa.get("improvements") or "").strip()
+            enhanced_request = f"Apply these improvements to make the design premium: {improvements}"
+            plan_json = json.dumps(plan, indent=2)
+            rewrite_prompt = FILE_MODIFY_FULL_REWRITE_PROMPT.format(
+                request=enhanced_request,
+                path=rel,
+                project_plan_json=plan_json,
+                context_bundle="{}",
+                existing_file=html_content,
+                design_system=C4_WEB_DESIGN_SYSTEM,
+            )
+            improved_content = self._run_role("coder", rewrite_prompt, context=context)
+            if improved_content and improved_content.strip() != html_content.strip():
+                self.executor.execute_step({
+                    "type": "update_file",
+                    "path": str(abs_path),
+                    "content": improved_content,
+                })
+                logger.info(f"[QA] Auto-improved {rel} (was score={score})")
+
+    # ── Fix 5: Live Preview ───────────────────────────────────────────────────
+
+    def _launch_preview(self, workspace_root: str) -> Optional[str]:
+        """Start a localhost http.server for the project and open browser. Returns URL."""
+        import socket
+        import threading
+        import webbrowser
+        import http.server
+        import os
+        from pathlib import Path
+
+        # Find the serve root: prefer a dist/ or public/ subdir, else workspace root
+        serve_dirs = ["dist", "public", "build", "."]
+        serve_root = workspace_root
+        for d in serve_dirs:
+            candidate = Path(workspace_root) / d
+            if candidate.is_dir() and any(candidate.glob("*.html")):
+                serve_root = str(candidate)
+                break
+
+        # Pick a free port
+        with socket.socket() as s:
+            s.bind(("", 0))
+            port = s.getsockname()[1]
+
+        def _serve():
+            os.chdir(serve_root)
+            handler = http.server.SimpleHTTPRequestHandler
+            handler.log_message = lambda *a: None  # silence request logs
+            with http.server.HTTPServer(("", port), handler) as httpd:
+                httpd.serve_forever()
+
+        try:
+            t = threading.Thread(target=_serve, daemon=True, name=f"C4Preview:{port}")
+            t.start()
+            url = f"http://localhost:{port}"
+            threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+            logger.info(f"[Preview] Serving '{serve_root}' at {url}")
+            return url
+        except Exception as e:
+            logger.warning(f"[Preview] Could not start preview server: {e}")
+            return None
 
     def _handle_write_code_active_window(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
         request = (intent.params.get("query") or intent.raw_text or "").strip()
