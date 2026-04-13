@@ -139,21 +139,21 @@ class ModelViewerSkill(BaseSkill):
 
         # ── Load specific model ──────────────────────────────────────────────
         if action == "load_model":
-            model_name = intent.params.get("model", "engine.glb")
+            model_name = intent.params.get("model", "arc-reactor.glb")
             if not model_name.endswith(".glb"):
                 model_name += ".glb"
             # Ensure browser is open first
             self._open_browser()
             # Small delay so the page can connect to the WS server
             time.sleep(1.5)
-            self._broadcast({"command": "load_model", "model": model_name})
+            self._broadcast({"type": "MODEL_ACTION", "action": "load_model", "params": {"model": model_name}})
             return SkillResult(text=f"Loading model {model_name} in the viewer, sir.")
 
         # ── Explode / Reset / Rotate / Zoom ─────────────────────────────────
         ws_cmd = self._ACTION_COMMAND_MAP.get(action)
         if ws_cmd:
             self._open_browser()                      # open viewer if not already open
-            self._broadcast({"command": ws_cmd})
+            self._broadcast({"type": "MODEL_ACTION", "action": ws_cmd, "params": intent.params})
             return SkillResult(text=self._spoken_response(action))
 
         # ── Unknown action fallback ──────────────────────────────────────────
@@ -222,9 +222,11 @@ class ModelViewerSkill(BaseSkill):
     def _spoken_response(action: str) -> str:
         """Generate a brief spoken response for each action."""
         responses = {
-            "explode_model": "Exploding the model into its components, sir.",
-            "reset_model":   "Reassembling the model, sir.",
-            "rotate_model":  "Rotating the model.",
-            "zoom_model":    "Adjusting zoom.",
+            "explode_model": "Exploding components for visual inspection, sir.",
+            "reset_model":   "Reassembling schematic. Model reset.",
+            "rotate_model":  "Initiating model rotation.",
+            "zoom_model":    "Adjusting focal depth.",
+            "open_viewer":   "Opening visualization interface. Please check your browser window, sir.",
+            "load_model":    "Loading 3D asset into projection matrix.",
         }
-        return responses.get(action, "Command sent to the 3D viewer, sir.")
+        return responses.get(action, "Command sequenced. Executing on visualization interface.")

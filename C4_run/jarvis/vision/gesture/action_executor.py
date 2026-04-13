@@ -115,6 +115,7 @@ class ActionExecutor:
             "BUS":    self._do_bus,
             "TRANSFORM": self._do_transform,
             "SWITCH_MODE": self._do_switch_mode,
+            "MODEL_ACTION": self._do_model_action,
             "ZOOM_IN": self._do_zoom_in,
             "ZOOM_OUT": self._do_zoom_out,
             "ROTATE_LEFT": self._do_rotate_left,
@@ -267,10 +268,23 @@ class ActionExecutor:
         gesture = event.data.get("gesture")
         state   = event.data.get("state")
         
+        x = event.data.get("x", 0.0)
+        y = event.data.get("y", 0.0)
+
+        # Globally stream spatial telemetry to WebSockets (for 3D viewer real-time tracking)
+        try:
+            from jarvis.skills.websocket_manager import WebSocketManager
+            WebSocketManager.instance().broadcast({
+                "type": "POINTER_SYNC",
+                "x": x,
+                "y": y,
+                "gesture": gesture
+            })
+        except Exception:
+            pass
+        
         # If we are in INDEX_POINT gesture and ACTIVE state, move the cursor
         if gesture == "INDEX_POINT" and state == "ACTIVE":
-            x = event.data.get("x", 0.0)
-            y = event.data.get("y", 0.0)
             self.move_cursor(x, y)
 
     def _do_transform(self, action: Dict) -> None:
@@ -324,13 +338,26 @@ class ActionExecutor:
     def _do_rotate_left(self, action: Dict) -> None:
         now = time.monotonic()
         if pyautogui and (now - self._last_rotate_time) > 0.1:
-            pyautogui.press('left') # General mapping, configurable per context later
+            pyautogui.press('left')
+            # Simultaneously broadcast a reliable WS message for the 3D viewer
+            try:
+                from jarvis.skills.websocket_manager import WebSocketManager
+                WebSocketManager.instance().broadcast({
+                    "type": "MODEL_ACTION", "action": "rotate_left"
+                })
+            except Exception: pass
             self._last_rotate_time = now
             
     def _do_rotate_right(self, action: Dict) -> None:
         now = time.monotonic()
         if pyautogui and (now - self._last_rotate_time) > 0.1:
             pyautogui.press('right')
+            try:
+                from jarvis.skills.websocket_manager import WebSocketManager
+                WebSocketManager.instance().broadcast({
+                    "type": "MODEL_ACTION", "action": "rotate_right"
+                })
+            except Exception: pass
             self._last_rotate_time = now
 
     def _do_switch_mode(self, action: Dict) -> None:
@@ -351,3 +378,21 @@ class ActionExecutor:
         else:
             if self._scene_manager:
                 self._scene_manager.stop()
+
+    def _do_model_action(self, action: Dict) -> None:
+        try:
+            from jarvis.skills.websocket_manager import WebSocketManager
+            ws_manager = WebSocketManager.instance()
+            
+            payload = {
+                "type": "MODEL_ACTION",
+                "action": action.get("model_action", action.get("action", "")),
+                "source": action.get("source", "selected"),
+                "target": action.get("target", "core"),
+                "params": action.get("params", {})
+            }
+            
+            ws_manager.broadcast(payload)
+            log.debug("ActionExecutor: broadcast MODEL_ACTION '%s'", payload["action"])
+        except Exception as exc:
+            log.error("ActionExecutor: failed to broadcast MODEL_ACTION — %s", exc)

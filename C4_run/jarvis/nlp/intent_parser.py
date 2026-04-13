@@ -187,48 +187,35 @@ class IntentParser:
             )
 
         # 8. 3D Model Viewer commands — must come BEFORE generic open_triggers
-        # so "open model viewer" / "open 3d viewer" etc. are captured here first.
-        _3d_triggers = [
-            # --- Open viewer ---
-            ("open model viewer",   "open_viewer",   {}),
-            ("launch model viewer", "open_viewer",   {}),
-            ("open 3d viewer",      "open_viewer",   {}),
-            ("open 3d model",       "load_model",    {}),
-            ("show 3d model",       "load_model",    {}),
-            ("3d viewer",           "open_viewer",   {}),
-            ("model viewer",        "open_viewer",   {}),
-            # --- Load model ---
-            ("load model",          "load_model",    {}),
-            ("show model",          "load_model",    {}),
-            ("show engine",         "load_model",    {"model": "engine.glb"}),
-            # --- Explode ---
-            ("explode model",       "explode_model", {}),
-            ("explode the model",   "explode_model", {}),
-            ("exploded view",       "explode_model", {}),
-            ("explode view",        "explode_model", {}),
-            # --- Reset ---
-            ("reset model",         "reset_model",   {}),
-            ("reset the model",     "reset_model",   {}),
-            ("collapse model",      "reset_model",   {}),
-            ("reassemble model",    "reset_model",   {}),
-            # --- Rotate ---
-            ("rotate model",        "rotate_model",  {}),
-            ("spin model",          "rotate_model",  {}),
-            ("turn model",          "rotate_model",  {}),
-            ("spin the model",      "rotate_model",  {}),
-            # --- Zoom ---
-            ("zoom in model",       "zoom_model",    {"direction": "in"}),
-            ("zoom out model",      "zoom_model",    {"direction": "out"}),
-            ("zoom model",          "zoom_model",    {}),
-        ]
-        for keyword, action, extra in _3d_triggers:
-            if keyword in lower:
-                return Intent(
-                    type=IntentType.MODEL_VIEW,
-                    raw_text=text,
-                    parsed_action=action,
-                    params={"query": text, **extra},
-                )
+        # Matches "show [the] [3d] model", "explode [the] AR", etc.
+        _3d_patterns = {
+            "load_model":  [r"(?:load|show|display|open|visualize)\s+(?:the\s+)?(?:3d\s+|ar\s+)?(?:model|reactor|arc[\s\-]?reactor|engine|assembly)"],
+            "open_viewer": [r"(?:open|launch|show|start)\s+(?:the\s+)?(?:3d\s+|ar\s+)?(?:viewer|display|visualization|ar)"],
+            "explode_model": [r"explode\s+(?:the\s+)?(?:3d\s+|ar\s+)?(?:model|reactor|arc[\s\-]?reactor|engine|ar|display|view)"],
+            "reset_model": [r"(?:reset|collapse|reassemble|assemble)\s+(?:the\s+)?(?:3d\s+|ar\s+)?(?:model|reactor|arc[\s\-]?reactor|engine|ar|display|view)"],
+            "rotate_model": [r"(?:rotate|spin|turn)\s+(?:the\s+)?(?:3d\s+|ar\s+)?(?:model|reactor|arc[\s\-]?reactor|engine|ar|display)"],
+            "zoom_model": [r"zoom\s+(?:in|out)?\s*(?:on\s+)?(?:the\s+)?(?:3d\s+|ar\s+)?(?:model|reactor|arc[\s\-]?reactor|engine|ar|display)"],
+        }
+        
+        for action, patterns in _3d_patterns.items():
+            for pat in patterns:
+                if re.search(pat, lower):
+                    params = {"query": text}
+                    if "arc" in lower or "reactor" in lower:
+                        params["model"] = "arc-reactor.glb"
+                    elif "engine" in lower:
+                        params["model"] = "engine.glb"
+                    
+                    if action == "zoom_model":
+                        if "out" in lower: params["direction"] = "out"
+                        else: params["direction"] = "in"
+                        
+                    return Intent(
+                        type=IntentType.MODEL_VIEW,
+                        raw_text=text,
+                        parsed_action=action,
+                        params=params,
+                    )
 
         # 9. Commands (simple keywords)
         open_triggers = ["open ", "launch ", "start ", "switch to "]

@@ -82,6 +82,7 @@ class SkillManager:
         "screenshot": "screenshot",
         "notes": "notes",
         "clipboard": "clipboard",
+        "model_viewer": "model_viewer",
     }
 
     def __init__(self, skills: List[Skill]) -> None:

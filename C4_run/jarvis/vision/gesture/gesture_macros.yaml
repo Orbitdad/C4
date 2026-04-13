@@ -230,6 +230,43 @@ macros:
         event: "3d.command"
         data: { "action": "RESET_VIEW" }
 
+  # ── 3D Viewer (Web Dashboard) ──────────────────────────────────
+  - name: "Explode 3D Model"
+    sequence: ["ARMS_SPREAD"]
+    context: "any"
+    mode: "ANY"
+    priority: 80
+    actions:
+      - type: MODEL_ACTION
+        model_action: "explode_model"
+
+  - name: "Reset 3D Model"
+    sequence: ["ARMS_CROSSED"]
+    context: "any"
+    mode: "ANY"
+    priority: 80
+    actions:
+      - type: MODEL_ACTION
+        model_action: "reset_model"
+
+  - name: "Remove Selected Part"
+    sequence: ["PINCH"]
+    context: "3d_viewer"
+    mode: "ANY"
+    priority: 50
+    actions:
+      - type: MODEL_ACTION
+        model_action: "remove_part"
+        
+  - name: "Restore Hidden Parts"
+    sequence: ["CIRCLE"]
+    context: "3d_viewer"
+    mode: "ANY"
+    priority: 50
+    actions:
+      - type: MODEL_ACTION
+        model_action: "add_part"
+
 # ── Context keyword → app-type mapping ────────────────────────
 #  Used by ContextEngine to classify the active window.
 app_keywords:
@@ -272,3 +309,8 @@ app_keywords:
     - unreal editor
     - autocad
     - fusion 360
+  3d_viewer:
+    - localhost:8080
+    - "c4 // 3d"
+    - "c4 // tactical 3d"
+    - "3d model viewer"

@@ -25,10 +25,17 @@ class VisionManager:
             # Prefer stable public API first; older/newer wheels may not expose
             # the internal mediapipe.python package layout consistently.
             self.mp_hands = mp.solutions.hands
+            self.mp_pose = mp.solutions.pose
             self.mp_draw = mp.solutions.drawing_utils
+            
             self.hands = self.mp_hands.Hands(
                 static_image_mode=False,
                 max_num_hands=2,
+                min_detection_confidence=0.7,
+                min_tracking_confidence=0.5
+            )
+            self.pose = self.mp_pose.Pose(
+                static_image_mode=False,
                 min_detection_confidence=0.7,
                 min_tracking_confidence=0.5
             )
@@ -150,6 +157,7 @@ class VisionManager:
                 self.latest_frame = frame.copy()
             hand_count = 0
             landmarks = []
+            all_hands = []
             annotated = frame.copy()   # We'll draw on this copy
 
             if self.hands:
@@ -178,9 +186,28 @@ class VisionManager:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65,
                             colour, 2, cv2.LINE_AA,
                         )
-                    # Pass ALL hands to the gesture controller
-                    all_hands = [h.landmark for h in results.multi_hand_landmarks]
-                    debug_dict = self.gesture_controller.process_all_hands(all_hands)
+                    all_hands = [h.landmark for h in results.multi_hand_landmarks] if results.multi_hand_landmarks else []
+                    # Extract index finger tip (landmark id 8) for UI updates of all hands
+                    for h in all_hands:
+                        idx_tip = h[8]
+                        landmarks.append((idx_tip.x, idx_tip.y))
+                        
+                if self.pose:
+                    with self.inference_lock:
+                        pose_results = self.pose.process(img_rgb)
+                    if pose_results and pose_results.pose_landmarks:
+                        self.mp_draw.draw_landmarks(
+                            annotated,
+                            pose_results.pose_landmarks,
+                            self.mp_pose.POSE_CONNECTIONS,
+                            self.mp_draw.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=2),
+                            self.mp_draw.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
+                        )
+                    
+                    pose_lms = pose_results.pose_landmarks.landmark if pose_results and pose_results.pose_landmarks else None
+                    
+                    # Pass ALL hands AND POSE to the gesture controller
+                    debug_dict = self.gesture_controller.process_all_hands(all_hands, pose_lms)
                     
                     if self.hui_window and debug_dict:
                         if hasattr(self.hui_window.signals, 'update_gesture_debug'):

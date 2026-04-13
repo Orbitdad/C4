@@ -28,11 +28,23 @@ class GestureController:
         
         self.enabled = True
 
-    def process_all_hands(self, hands_list):
+    def process_all_hands(self, hands_list, pose_landmarks=None):
         """
-        Process all detected hands in the frame for multi-hand gestures.
+        Process all detected hands and full body pose if available.
         """
-        if not self.enabled or not hands_list:
+        if not self.enabled:
+            return
+
+        # 1. First, check full-body macro gestures if pose is available.
+        if pose_landmarks:
+            pose_gesture = self.classifier.classify_pose(pose_landmarks)
+            if pose_gesture != "NONE":
+                # If we detect a macro pose, we inject it directly
+                # We skip hand processing so it doesn't conflict
+                raw_gesture = pose_gesture
+                return self.process_landmarks(None, raw_gesture)
+
+        if not hands_list:
             return
 
         # Always feed the first hand to the classifier for backwards parity
@@ -68,12 +80,17 @@ class GestureController:
         """
         Process raw landmarks from vision manager (Primary hand).
         """
-        if not self.enabled or not landmarks:
+        if not self.enabled:
+            return
+            
+        if not landmarks and raw_gesture is None:
             return
 
-        # 1. Pose Smoothing
-        raw_pos = self.detector.get_index_tip(landmarks)
-        smooth_pos = self.tracker.smooth(raw_pos)
+        # 1. Pose Smoothing (Skip if no hand landmarks, just use center)
+        smooth_pos = (0.5, 0.5, 0.5)
+        if landmarks:
+            raw_pos = self.detector.get_index_tip(landmarks)
+            smooth_pos = self.tracker.smooth(raw_pos)
 
         # 2. Gesture Recognition
         if raw_gesture is None:

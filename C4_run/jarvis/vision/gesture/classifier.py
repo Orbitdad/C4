@@ -17,7 +17,7 @@ class GestureClassifier:
 
     def classify(self, landmarks: List[Any]) -> str:
         """
-        Determines the current gesture from landmarks.
+        Determines the current hand gesture from landmarks.
         Returns: OPEN_PALM, FIST, INDEX_POINT, PINCH, SWIPE_LEFT, SWIPE_RIGHT, CIRCLE, UNKNOWN
         """
         if not landmarks:
@@ -41,6 +41,16 @@ class GestureClassifier:
         if pinch_dist < self.pinch_threshold:
             return "PINCH"
 
+        # 3D Depth (ZOOM) and Rotation detection (Continuous Signals)
+        if len(self.pos_history) == self.pos_history.maxlen:
+            zoom_gesture = self._detect_zoom()
+            if zoom_gesture != "NONE":
+                return zoom_gesture
+                
+            rot_gesture = self._detect_rotation()
+            if rot_gesture != "NONE":
+                return rot_gesture
+
         # OPEN_PALM (All fingers up)
         if all(fingers_up):
             return "OPEN_PALM"
@@ -63,17 +73,49 @@ class GestureClassifier:
         if self._detect_circle():
             return "CIRCLE"
 
-        # 3D Depth (ZOOM) and Rotation detection (Continuous Signals)
-        if len(self.pos_history) == self.pos_history.maxlen:
-            zoom_gesture = self._detect_zoom()
-            if zoom_gesture != "NONE":
-                return zoom_gesture
-                
-            rot_gesture = self._detect_rotation()
-            if rot_gesture != "NONE":
-                return rot_gesture
-
         return "UNKNOWN"
+
+    def classify_pose(self, lm: List[Any]) -> str:
+        """
+        Classify full body pose heuristics.
+        Returns: ARMS_SPREAD, ARMS_CROSSED, or NONE
+        """
+        if not lm or len(lm) < 33:
+            return "NONE"
+            
+        # Landmarks: 11 (Left Shoulder), 12 (Right Shoulder)
+        # 15 (Left Wrist), 16 (Right Wrist)
+        ls_x, ls_y = lm[11].x, lm[11].y
+        rs_x, rs_y = lm[12].x, lm[12].y
+        lw_x, lw_y = lm[15].x, lm[15].y
+        rw_x, rw_y = lm[16].x, lm[16].y
+        
+        shoulder_dist = abs(ls_x - rs_x)
+        if shoulder_dist < 0.05:
+            return "NONE" # sideways or error
+            
+        wrist_dist_x = abs(lw_x - rw_x)
+        
+        # 1. ARMS_SPREAD
+        # If wrists are much farther apart than shoulders
+        if wrist_dist_x > shoulder_dist * 1.8:
+            return "ARMS_SPREAD"
+            
+        # 2. ARMS_CROSSED
+        # Determine if horizontally crossed:
+        # If looking at a mirror, right shoulder (12) is left side (smaller x), left shoulder (11) is right side (larger x).
+        # Wrists crossed means left wrist (15) is at smaller x than right wrist (16).
+        is_mirrored = ls_x > rs_x
+        if is_mirrored:
+            is_crossed = lw_x < rw_x
+        else:
+            is_crossed = lw_x > rw_x
+            
+        # Additionally, must be somewhat elevated towards the chest
+        if is_crossed and lw_y < ls_y + 0.3 and rw_y < rs_y + 0.3:
+            return "ARMS_CROSSED"
+            
+        return "NONE"
 
     def _get_fingers_up(self, lm: List[Any]) -> List[bool]:
         """

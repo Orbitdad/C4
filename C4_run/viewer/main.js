@@ -29,10 +29,22 @@ import { RGBELoader }     from 'three/addons/loaders/RGBELoader.js';
 
 const WS_URL          = 'ws://localhost:8765';  // C4 Python backend
 const MODELS_PATH     = './models/';            // Folder served by serve.py
-const DEFAULT_MODEL   = 'engine.glb';
+const DEFAULT_MODEL   = 'arc-reactor.glb';
 const EXPLODE_FACTOR  = 2.8;                    // How far parts spread (scene-unit multiplier)
 const LERP_SPEED      = 0.055;                  // 0 → 1: higher = snappier animation
 const LOG_MAX_ENTRIES = 8;                      // Max lines shown in command log panel
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  APP STATE
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AppState = {
+  modelLoaded: false,
+  exploded: false,
+  selectedPart: null,
+  draggedPart: null,
+  assemblyMode: true
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  UI OVERLAY
@@ -198,6 +210,103 @@ const SceneManager = (() => {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // ── Raycasting (Selection & Drag) ──────────────────────────────────────────
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  const dragPlane = new THREE.Plane();
+
+  window.addEventListener('mousemove', (event) => {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  });
+
+  function _performRaycast() {
+    if (!AppState.modelLoaded) return;
+    
+    // Reset previous selection emissive highlight
+    if (AppState.selectedPart && AppState.selectedPart.material) {
+      if (AppState.selectedPart.material.emissive) {
+         AppState.selectedPart.material.emissive.setHex(0x000000);
+      }
+      AppState.selectedPart = null;
+    }
+
+    raycaster.setFromCamera(mouse, camera);
+    const parts = ModelLoader.getParts().map(p => p.mesh).filter(m => m.visible);
+    const intersects = raycaster.intersectObjects(parts, false);
+
+    if (intersects.length > 0) {
+      const mesh = intersects[0].object;
+      AppState.selectedPart = mesh;
+      // Inject emissive highlight for visual feedback
+      if (mesh.material && mesh.material.emissive) {
+        mesh.material.emissive.setHex(0x00aaff);
+        mesh.material.emissiveIntensity = 0.5;
+      }
+    }
+  }
+
+  function setPointerSync(x, y, gesture) {
+      if (!AppState.modelLoaded) return;
+      
+      // Override mouse tracker with ML vision coordinates
+      mouse.x = (x * 2) - 1;
+      mouse.y = -(y * 2) + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      
+      if (gesture === 'PINCH') {
+          if (AppState.draggedPart) {
+              const intersectPoint = new THREE.Vector3();
+              raycaster.ray.intersectPlane(dragPlane, intersectPoint);
+              if (intersectPoint) {
+                  // If parented, convert world intersect to local space
+                  if (AppState.draggedPart.parent) {
+                      AppState.draggedPart.parent.worldToLocal(intersectPoint);
+                  }
+                  AppState.draggedPart.position.copy(intersectPoint);
+              }
+          } else {
+              // Try to grab
+              const parts = ModelLoader.getParts().map(p => p.mesh).filter(m => m.visible);
+              const intersects = raycaster.intersectObjects(parts, true); // True fixes nested mesh issues
+              
+              if (intersects.length > 0) {
+                  AppState.draggedPart = intersects[0].object;
+                  
+                  // Make the dragged part the selected part as well, for UI feedback
+                  if (AppState.selectedPart && AppState.selectedPart !== AppState.draggedPart && AppState.selectedPart.material && AppState.selectedPart.material.emissive) {
+                      AppState.selectedPart.material.emissive.setHex(0x000000);
+                  }
+                  AppState.selectedPart = AppState.draggedPart;
+                  if (AppState.selectedPart.material && AppState.selectedPart.material.emissive) {
+                      AppState.selectedPart.material.emissive.setHex(0x00aaff);
+                      AppState.selectedPart.material.emissiveIntensity = 0.5;
+                  }
+                  
+                  // Setup drag plane for this object pointing at camera
+                  const targetWorldPos = new THREE.Vector3();
+                  AppState.draggedPart.getWorldPosition(targetWorldPos);
+                  
+                  dragPlane.setFromNormalAndCoplanarPoint(
+                      camera.getWorldDirection(new THREE.Vector3()).negate(), 
+                      targetWorldPos
+                  );
+                  controls.enabled = false;
+              }
+          }
+      } else {
+          // Not pinching, drop Part
+          if (AppState.draggedPart) {
+              if (AppState.assemblyMode && typeof AssemblySystem !== 'undefined') {
+                  AssemblySystem.checkSnap(AppState.draggedPart);
+              }
+              AppState.draggedPart = null;
+              controls.enabled = true;
+          }
+      }
+  }
+
   // ── Animation loop ─────────────────────────────────────────────────────────
 
   const _onTickCallbacks = [];
@@ -207,12 +316,13 @@ const SceneManager = (() => {
   function startLoop() {
     renderer.setAnimationLoop(() => {
       controls.update();
+      _performRaycast();
       _onTickCallbacks.forEach(fn => fn());
       renderer.render(scene, camera);
     });
   }
 
-  return { scene, camera, controls, renderer, addTickCallback, startLoop };
+  return { scene, camera, controls, renderer, addTickCallback, startLoop, setPointerSync };
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,11 +395,14 @@ const ModelLoader = (() => {
       UIOverlay.setModelInfo(filename, _parts.length);
       UIOverlay.hideLoading();
       UIOverlay.logCommand(`loaded ${_parts.length} parts ✓`);
+      AppState.modelLoaded = true;
+      AppState.selectedPart = null;
     } catch (err) {
       console.error('[ModelLoader] Failed to load model:', err);
       UIOverlay.hideLoading();
       UIOverlay.showError(`Failed to load "${filename}". Check models/ directory.`);
       UIOverlay.logCommand(`ERROR: ${filename} not found`);
+      AppState.modelLoaded = false;
     }
   }
 
@@ -359,11 +472,13 @@ const ModelLoader = (() => {
         explodedPos:  explodedPos,
         // Current lerp target — starts at original position
         targetPos:    worldPos.clone(),
+        currentParent: obj.parent,
+        isAttached:   false
       });
     });
   }
 
-  return { load, getParts, isLoaded };
+  return { load, getParts, isLoaded, getRoot: () => _modelRoot };
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -417,8 +532,8 @@ const ExplodedView = (() => {
   }
 
   function _explode() {
-    if (_isExploded) return;
-    _isExploded = true;
+    if (AppState.exploded) return;
+    AppState.exploded = true;
     _animating  = true;
     ModelLoader.getParts().forEach(part => {
       part.targetPos.copy(part.explodedPos);
@@ -428,8 +543,8 @@ const ExplodedView = (() => {
   }
 
   function _assemble() {
-    if (!_isExploded) return;
-    _isExploded = false;
+    if (!AppState.exploded) return;
+    AppState.exploded = false;
     _animating  = true;
     ModelLoader.getParts().forEach(part => {
       part.targetPos.copy(part.origPos);
@@ -438,11 +553,121 @@ const ExplodedView = (() => {
     UIOverlay.logCommand('reset_model → animating');
   }
 
-  function explode()  { if (!_isExploded) _explode(); }
-  function reset()    { if (_isExploded)  _assemble(); }
-  function isExploded() { return _isExploded; }
+  function explode()  { if (!AppState.exploded) _explode(); }
+  function reset()    { if (AppState.exploded)  _assemble(); }
+  function isExploded() { return AppState.exploded; }
 
-  return { toggle, explode, reset, isExploded };
+  // ── Part manipulation ─────────────────────────────────────────────────────
+  
+  function removeSelectedPart() {
+    if (!AppState.selectedPart) {
+      UIOverlay.showError("No part selected to remove!");
+      return;
+    }
+    AppState.selectedPart.visible = false;
+    UIOverlay.logCommand(`Removed part`);
+  }
+  
+  function addHiddenPartsBack() {
+    ModelLoader.getParts().forEach(part => {
+      part.mesh.visible = true;
+    });
+    UIOverlay.logCommand(`Restored hidden parts`);
+  }
+
+  return { toggle, explode, reset, isExploded, removeSelectedPart, addHiddenPartsBack };
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ASSEMBLY SYSTEM
+//  Handles manual part attachment, detachment, grouping, and snapping logic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AssemblySystem = (() => {
+  const SNAP_THRESHOLD = 0.5;
+
+  function attachPart(child, parent) {
+    if (!child || !parent) return;
+    parent.attach(child);
+    
+    const partData = ModelLoader.getParts().find(p => p.mesh === child);
+    if (partData) {
+      partData.currentParent = parent;
+      partData.isAttached = true;
+    }
+    UIOverlay.logCommand(`Attached part structure`);
+  }
+
+  function detachPart(child) {
+    if (!child) return;
+    SceneManager.scene.attach(child);
+
+    const partData = ModelLoader.getParts().find(p => p.mesh === child);
+    if (partData) {
+      partData.currentParent = SceneManager.scene;
+      partData.isAttached = false;
+    }
+    UIOverlay.logCommand(`Detached part`);
+  }
+
+  function createGroup(partsArr) {
+    if (!partsArr || partsArr.length < 1) return;
+    const newGroup = new THREE.Group();
+    SceneManager.scene.add(newGroup);
+    partsArr.forEach(part => {
+      newGroup.attach(part);
+      const partData = ModelLoader.getParts().find(p => p.mesh === part);
+      if (partData) {
+        partData.currentParent = newGroup;
+        partData.isAttached = true;
+      }
+    });
+
+    UIOverlay.logCommand(`Created new group`);
+    return newGroup;
+  }
+
+  function checkSnap(droppedMesh) {
+    if (!droppedMesh) return;
+    
+    let closestDist = Infinity;
+    let closestTarget = null;
+    
+    const worldDroppedPos = new THREE.Vector3();
+    droppedMesh.getWorldPosition(worldDroppedPos);
+
+    ModelLoader.getParts().forEach(part => {
+      if (part.mesh === droppedMesh) return;
+      if (!part.mesh.visible) return;
+      
+      const worldTargetPos = new THREE.Vector3();
+      part.mesh.getWorldPosition(worldTargetPos);
+
+      const dist = worldDroppedPos.distanceTo(worldTargetPos);
+      if (dist < SNAP_THRESHOLD && dist < closestDist) {
+         closestDist = dist;
+         closestTarget = part.mesh;
+      }
+    });
+
+    if (closestTarget) {
+      closestTarget.attach(droppedMesh);
+      // Snap closely to center of target for rigid assembly feel
+      droppedMesh.position.set(0, 0, 0); 
+      droppedMesh.rotation.set(0, 0, 0); 
+      
+      const partData = ModelLoader.getParts().find(p => p.mesh === droppedMesh);
+      if (partData) {
+        partData.currentParent = closestTarget;
+        partData.isAttached = true;
+      }
+      UIOverlay.logCommand(`Snapped & Attached part`);
+    } else {
+      detachPart(droppedMesh);
+    }
+  }
+
+  return { attachPart, detachPart, createGroup, checkSnap };
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -461,13 +686,20 @@ const CommandHandler = (() => {
     UIOverlay.logCommand(`cmd ← ${command}`);
     console.info(`[CommandHandler] Received: ${command}`, payload);
 
+    if (!AppState.modelLoaded && command !== "load_model" && command !== "connected") {
+      UIOverlay.showError("Action ignored. No model is actively loaded.");
+      return;
+    }
+
     switch (command) {
       // ── 3D model commands ─────────────────────────────────────────────────
       case 'explode':
+      case 'explode_model':
         ExplodedView.explode();
         break;
 
       case 'reset':
+      case 'reset_model':
         ExplodedView.reset();
         break;
 
@@ -475,22 +707,90 @@ const CommandHandler = (() => {
         ExplodedView.toggle();
         break;
 
+      case 'remove_part':
+        ExplodedView.removeSelectedPart();
+        break;
+        
+      case 'add_part':
+        ExplodedView.addHiddenPartsBack();
+        break;
+
+      case 'attach_part': {
+        const source = payload.source || 'selected';
+        const target = payload.target || 'core';
+        
+        const sourceMesh = (source === 'selected') ? AppState.selectedPart : null;
+        let targetMesh = null;
+        if (target === 'core') targetMesh = ModelLoader.getRoot();
+        
+        if (sourceMesh && targetMesh) {
+           AssemblySystem.attachPart(sourceMesh, targetMesh);
+        } else if (sourceMesh) {
+           AssemblySystem.checkSnap(sourceMesh);
+        } else {
+           UIOverlay.showError("Needs a selected part to attach");
+        }
+        break;
+      }
+
+      case 'detach_part': {
+        if (AppState.selectedPart) {
+           AssemblySystem.detachPart(AppState.selectedPart);
+        } else {
+           UIOverlay.showError("No part selected to detach");
+        }
+        break;
+      }
+
+      case 'create_group': {
+        if (AppState.selectedPart) {
+           AssemblySystem.createGroup([AppState.selectedPart]);
+        } else {
+           UIOverlay.showError("Select a part to base a group on");
+        }
+        break;
+      }
+
+      case 'move_part': {
+        UIOverlay.logCommand("move_part: Drag directly via gesture");
+        break;
+      }
+
       case 'load_model': {
-        const model = payload.model || DEFAULT_MODEL;
+        const params = payload.params || {};
+        const model = params.model || DEFAULT_MODEL;
         ModelLoader.load(model);
         break;
       }
 
-      case 'rotate': {
-        const enable = !SceneManager.controls.autoRotate;
-        SceneManager.controls.autoRotate = enable;
-        UIOverlay.logCommand(`auto-rotate ${enable ? 'ON' : 'OFF'}`);
-        // Update toolbar button visual (optional future: active class)
+      case 'rotate':
+      case 'rotate_model':
+      case 'rotate_left':
+      case 'rotate_right': {
+        const increment = (command.includes('left') || (payload.params && payload.params.direction === 'left')) ? -0.15 : 0.15;
+        
+        // If it's just 'rotate' with no specific direction, it acts as a toggle.
+        if (command === 'rotate' && (!payload.params || !payload.params.direction)) {
+            const enable = !SceneManager.controls.autoRotate;
+            SceneManager.controls.autoRotate = enable;
+            UIOverlay.logCommand(`auto-rotate ${enable ? 'ON' : 'OFF'}`);
+        } else {
+            // Give it an explicit spin
+            SceneManager.controls.autoRotate = false; // Turn off auto-rotate to allow manual control
+            
+            // Adjust the actual camera rotation or controls target
+            const azimuth = SceneManager.controls.getAzimuthalAngle();
+            SceneManager.controls.setAzimuthalAngle(azimuth + increment);
+            SceneManager.controls.update();
+            UIOverlay.logCommand(`manual twist ${increment > 0 ? "→" : "←"}`);
+        }
         break;
       }
 
-      case 'zoom': {
-        const dir = payload.direction || 'in';
+      case 'zoom':
+      case 'zoom_model': {
+        const params = payload.params || {};
+        const dir = params.direction || 'in';
         const factor = dir === 'out' ? 1.3 : 0.77;
         SceneManager.camera.position.multiplyScalar(factor);
         UIOverlay.logCommand(`zoom ${dir}`);
@@ -549,8 +849,20 @@ const WebSocketClient = (() => {
     _ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
-        const command = payload.command || '';
-        if (command) CommandHandler.execute(command, payload);
+        
+        if (payload.type === "POINTER_SYNC") {
+           SceneManager.setPointerSync(payload.x, payload.y, payload.gesture);
+           return;
+        }
+        
+        let action = "";
+        if (payload.type === "MODEL_ACTION") {
+           action = payload.action;
+        } else {
+           action = payload.command || ''; // legacy fallback
+        }
+        
+        if (action) CommandHandler.execute(action, payload);
       } catch (err) {
         console.warn('[WebSocketClient] Could not parse message:', event.data);
       }
