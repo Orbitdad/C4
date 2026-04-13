@@ -24,6 +24,7 @@ class IntentType(str, Enum):
     EDIT_CODE_ACTIVE_WINDOW = "edit_code_active_window"
     PASTE_CODE = "paste_code"
     SENSE_GAP = "sense_gap"   # Phase 10: capability gap — trigger SkillSynthesizer
+    MODEL_VIEW = "model_view"  # 3D model viewer commands (explode, reset, load, etc.)
     UNKNOWN = "unknown"
 
 

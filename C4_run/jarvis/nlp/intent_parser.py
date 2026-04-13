@@ -186,8 +186,52 @@ class IntentParser:
                 params={"capabilities": True},
             )
 
-        # 8. Commands (simple keywords)
-        open_triggers = ["open ", "launch ", "start "]
+        # 8. 3D Model Viewer commands — must come BEFORE generic open_triggers
+        # so "open model viewer" / "open 3d viewer" etc. are captured here first.
+        _3d_triggers = [
+            # --- Open viewer ---
+            ("open model viewer",   "open_viewer",   {}),
+            ("launch model viewer", "open_viewer",   {}),
+            ("open 3d viewer",      "open_viewer",   {}),
+            ("open 3d model",       "load_model",    {}),
+            ("show 3d model",       "load_model",    {}),
+            ("3d viewer",           "open_viewer",   {}),
+            ("model viewer",        "open_viewer",   {}),
+            # --- Load model ---
+            ("load model",          "load_model",    {}),
+            ("show model",          "load_model",    {}),
+            ("show engine",         "load_model",    {"model": "engine.glb"}),
+            # --- Explode ---
+            ("explode model",       "explode_model", {}),
+            ("explode the model",   "explode_model", {}),
+            ("exploded view",       "explode_model", {}),
+            ("explode view",        "explode_model", {}),
+            # --- Reset ---
+            ("reset model",         "reset_model",   {}),
+            ("reset the model",     "reset_model",   {}),
+            ("collapse model",      "reset_model",   {}),
+            ("reassemble model",    "reset_model",   {}),
+            # --- Rotate ---
+            ("rotate model",        "rotate_model",  {}),
+            ("spin model",          "rotate_model",  {}),
+            ("turn model",          "rotate_model",  {}),
+            ("spin the model",      "rotate_model",  {}),
+            # --- Zoom ---
+            ("zoom in model",       "zoom_model",    {"direction": "in"}),
+            ("zoom out model",      "zoom_model",    {"direction": "out"}),
+            ("zoom model",          "zoom_model",    {}),
+        ]
+        for keyword, action, extra in _3d_triggers:
+            if keyword in lower:
+                return Intent(
+                    type=IntentType.MODEL_VIEW,
+                    raw_text=text,
+                    parsed_action=action,
+                    params={"query": text, **extra},
+                )
+
+        # 9. Commands (simple keywords)
+        open_triggers = ["open ", "launch ", "start ", "switch to "]
         if any(w in lower for w in open_triggers):
             query = self._extract_target(text, open_triggers)
             return Intent(
@@ -407,7 +451,7 @@ class IntentParser:
                 params={"gap_description": text},
             )
 
-        # 11. Default: question or generic command
+        # 12. Default: question or generic command
         return Intent(
             type=IntentType.QUESTION,
             raw_text=text,

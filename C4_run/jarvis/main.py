@@ -31,6 +31,7 @@ from .skills.notes import NotesSkill
 from .skills.clipboard import ClipboardSkill
 from .skills.os_god_mode import OSGodModeSkill
 from .skills.smart_home import SmartHomeSkill
+from .skills.model_viewer import ModelViewerSkill
 from .vision.manager import VisionManager
 from .execution.executor import Executor
 from .vision.gesture.action_executor import ActionExecutor
@@ -139,6 +140,7 @@ def run() -> None:
         ClipboardSkill(),
         OSGodModeSkill(),
         SmartHomeSkill(),
+        ModelViewerSkill(),
     ]
     skill_manager = SkillManager(skills)
 

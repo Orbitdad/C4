@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="C4 Intelligence System — Real-time 3D Model Viewer powered by Three.js and controlled via WebSocket." />
+  <title>C4 // 3D Model Viewer</title>
+
+  <!-- Google Fonts: Orbitron for the HUD aesthetic -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;900&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ═══════════════════════════════════════════════
+       ROOT TOKENS & RESET
+    ═══════════════════════════════════════════════ */
+    :root {
+      --c4-blue:    #00c8ff;
+      --c4-teal:    #00ffcc;
+      --c4-dark:    #020d18;
+      --c4-panel:   rgba(0, 20, 40, 0.82);
+      --c4-border:  rgba(0, 200, 255, 0.3);
+      --c4-glow:    0 0 12px rgba(0, 200, 255, 0.6);
+      --c4-glow-lg: 0 0 40px rgba(0, 200, 255, 0.25);
+      --font-hud:   'Orbitron', sans-serif;
+      --font-mono:  'Share Tech Mono', monospace;
+      --radius:     6px;
+      --transition: 0.25s ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--c4-dark);
+      overflow: hidden;
+      font-family: var(--font-hud);
+      color: var(--c4-blue);
+    }
+
+    /* ═══════════════════════════════════════════════
+       THREE.JS CANVAS
+    ═══════════════════════════════════════════════ */
+    #viewer-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SCANLINE OVERLAY (aesthetic)
+    ═══════════════════════════════════════════════ */
+    #scanlines {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        rgba(0, 0, 0, 0.06) 3px,
+        rgba(0, 0, 0, 0.06) 4px
+      );
+      z-index: 10;
+    }
+
+    /* ═══════════════════════════════════════════════
+       TOP HEADER BAR
+    ═══════════════════════════════════════════════ */
+    #hud-header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 24px;
+      background: linear-gradient(180deg, rgba(0,10,25,0.95) 0%, transparent 100%);
+      border-bottom: 1px solid var(--c4-border);
+      z-index: 20;
+      backdrop-filter: blur(4px);
+    }
+
+    #hud-title {
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, var(--c4-blue), var(--c4-teal));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #hud-subtitle {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: rgba(0, 200, 255, 0.5);
+      letter-spacing: 2px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       LEFT PANEL — Connection & Model Info
+    ═══════════════════════════════════════════════ */
+    #panel-left {
+      position: fixed;
+      top: 60px;
+      left: 20px;
+      width: 240px;
+      background: var(--c4-panel);
+      border: 1px solid var(--c4-border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      z-index: 20;
+      backdrop-filter: blur(8px);
+      box-shadow: var(--c4-glow-lg);
+    }
+
+    .panel-label {
+      font-size: 8px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: rgba(0, 200, 255, 0.45);
+      margin-bottom: 8px;
+    }
+
+    .panel-value {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--c4-teal);
+      line-height: 1.6;
+    }
+
+    .panel-divider {
+      height: 1px;
+      background: var(--c4-border);
+      margin: 10px 0;
+    }
+
+    /* Status dot */
+    .status-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-right: 6px;
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+    .status-dot.connected    { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+    .status-dot.disconnected { background: #ff3b3b; box-shadow: 0 0 6px #ff3b3b; animation: none; }
+    .status-dot.connecting   { background: #ffcc00; box-shadow: 0 0 6px #ffcc00; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.35; }
+    }
+
+    /* ═══════════════════════════════════════════════
+       RIGHT PANEL — Command Log
+    ═══════════════════════════════════════════════ */
+    #panel-right {
+      position: fixed;
+      top: 60px;
+      right: 20px;
+      width: 250px;
+      background: var(--c4-panel);
+      border: 1px solid var(--c4-border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      z-index: 20;
+      backdrop-filter: blur(8px);
+      box-shadow: var(--c4-glow-lg);
+      max-height: 300px;
+      overflow: hidden;
+    }
+
+    #command-log {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: rgba(0, 200, 255, 0.75);
+      line-height: 1.8;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .cmd-entry {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      opacity: 0;
+      transform: translateX(10px);
+      animation: slide-in 0.3s ease forwards;
+    }
+
+    .cmd-entry .cmd-time {
+      color: rgba(0, 200, 255, 0.35);
+      flex-shrink: 0;
+      font-size: 9px;
+    }
+
+    .cmd-entry .cmd-text {
+      color: var(--c4-teal);
+    }
+
+    @keyframes slide-in {
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ═══════════════════════════════════════════════
+       BOTTOM TOOLBAR — Quick control buttons
+    ═══════════════════════════════════════════════ */
+    #toolbar {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 12px;
+      z-index: 20;
+      background: var(--c4-panel);
+      border: 1px solid var(--c4-border);
+      border-radius: 40px;
+      padding: 10px 20px;
+      backdrop-filter: blur(8px);
+      box-shadow: var(--c4-glow-lg);
+    }
+
+    .tool-btn {
+      background: transparent;
+      border: 1px solid var(--c4-border);
+      color: var(--c4-blue);
+      font-family: var(--font-hud);
+      font-size: 9.5px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 7px 18px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tool-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, var(--c4-blue), var(--c4-teal));
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .tool-btn:hover {
+      color: var(--c4-dark);
+      border-color: var(--c4-teal);
+      box-shadow: var(--c4-glow);
+    }
+    .tool-btn:hover::before { opacity: 1; }
+    .tool-btn span { position: relative; z-index: 1; }
+
+    /* ═══════════════════════════════════════════════
+       LOADING OVERLAY
+    ═══════════════════════════════════════════════ */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--c4-dark);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 100;
+      transition: opacity 0.6s ease;
+    }
+
+    #loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-ring {
+      width: 64px; height: 64px;
+      border: 2px solid rgba(0, 200, 255, 0.15);
+      border-top-color: var(--c4-blue);
+      border-right-color: var(--c4-teal);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loading-text {
+      font-size: 11px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--c4-blue);
+      font-family: var(--font-mono);
+    }
+
+    /* ═══════════════════════════════════════════════
+       ERROR TOAST
+    ═══════════════════════════════════════════════ */
+    #error-toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      background: rgba(255, 40, 40, 0.15);
+      border: 1px solid rgba(255, 60, 60, 0.5);
+      color: #ff6b6b;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      padding: 10px 24px;
+      border-radius: 4px;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: all var(--transition);
+      backdrop-filter: blur(6px);
+    }
+
+    #error-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ═══════════════════════════════════════════════
+       CORNER BRACKETS (decorative)
+    ═══════════════════════════════════════════════ */
+    .corner {
+      position: fixed;
+      width: 24px; height: 24px;
+      z-index: 15;
+      pointer-events: none;
+    }
+    .corner::before, .corner::after {
+      content: '';
+      position: absolute;
+      background: var(--c4-teal);
+      box-shadow: 0 0 8px var(--c4-teal);
+    }
+    .corner::before { width: 2px; height: 100%; }
+    .corner::after  { width: 100%; height: 2px; }
+
+    .corner.tl { top: 6px; left: 6px; }
+    .corner.tr { top: 6px; right: 6px; transform: scaleX(-1); }
+    .corner.bl { bottom: 6px; left: 6px; transform: scaleY(-1); }
+    .corner.br { bottom: 6px; right: 6px; transform: scale(-1); }
+  </style>
+</head>
+<body>
+
+  <!-- Decorative corner brackets -->
+  <div class="corner tl" aria-hidden="true"></div>
+  <div class="corner tr" aria-hidden="true"></div>
+  <div class="corner bl" aria-hidden="true"></div>
+  <div class="corner br" aria-hidden="true"></div>
+
+  <!-- Scanline effect -->
+  <div id="scanlines" aria-hidden="true"></div>
+
+  <!-- Three.js canvas target -->
+  <canvas id="viewer-canvas"></canvas>
+
+  <!-- Top header -->
+  <header id="hud-header">
+    <div id="hud-title">C4 // Tactical 3D Viewer</div>
+    <div id="hud-subtitle">THREE.JS · GLTF · WS:8765</div>
+  </header>
+
+  <!-- Left info panel -->
+  <aside id="panel-left" role="complementary" aria-label="Model information">
+    <div class="panel-label">Connection</div>
+    <div class="panel-value" id="ws-status">
+      <span class="status-dot connecting" id="status-dot"></span>
+      <span id="status-text">Connecting…</span>
+    </div>
+
+    <div class="panel-divider"></div>
+
+    <div class="panel-label">Model</div>
+    <div class="panel-value" id="model-name">No model loaded</div>
+
+    <div class="panel-divider"></div>
+
+    <div class="panel-label">Mesh Parts</div>
+    <div class="panel-value" id="mesh-count">—</div>
+
+    <div class="panel-divider"></div>
+
+    <div class="panel-label">State</div>
+    <div class="panel-value" id="view-state">Assembled</div>
+  </aside>
+
+  <!-- Right command log panel -->
+  <aside id="panel-right" role="complementary" aria-label="Command history">
+    <div class="panel-label">Command Log</div>
+    <div id="command-log"></div>
+  </aside>
+
+  <!-- Bottom toolbar -->
+  <nav id="toolbar" aria-label="Model controls">
+    <button class="tool-btn" id="btn-explode"  onclick="window.explodeModel()"  title="Explode model into parts">
+      <span>Explode</span>
+    </button>
+    <button class="tool-btn" id="btn-reset"    onclick="window.resetModel()"    title="Reassemble model">
+      <span>Reset</span>
+    </button>
+    <button class="tool-btn" id="btn-rotate"   onclick="window.toggleRotate()"  title="Toggle auto-rotation">
+      <span>Rotate</span>
+    </button>
+    <button class="tool-btn" id="btn-load"     onclick="window.loadDefaultModel()" title="Load default model">
+      <span>Load Model</span>
+    </button>
+  </nav>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-ring"></div>
+    <div id="loading-text">Initialising C4 Viewer</div>
+  </div>
+
+  <!-- Error toast -->
+  <div id="error-toast" role="alert" aria-live="assertive"></div>
+
+  <!-- Three.js + GLTFLoader from CDN (no build step required) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three":                  "https://unpkg.com/three@0.163.0/build/three.module.js",
+      "three/addons/":          "https://unpkg.com/three@0.163.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- Main application module -->
+  <script type="module" src="main.js"></script>
+</body>
+</html>

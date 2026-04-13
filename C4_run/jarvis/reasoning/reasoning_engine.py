@@ -372,6 +372,19 @@ class ReasoningEngine:
             res = self.skill_synthesizer.synthesize(intent.raw_text, gap_description=intent.params.get("gap_description", ""))
             return ReasoningResponse(spoken_response=res["message"])
 
+        # ── 3D Model Viewer commands ──────────────────────────────────────────
+        if intent.type == IntentType.MODEL_VIEW:
+            skill = self.skills.skills.get("model_viewer")
+            if skill:
+                result = skill.execute(intent, context)
+                return ReasoningResponse(
+                    spoken_response=result.text or "Command sent to the 3D viewer, sir.",
+                    last_action={"model_view": intent.parsed_action},
+                )
+            return ReasoningResponse(
+                spoken_response="The 3D model viewer skill is not available, sir."
+            )
+
         world.update_cognitive_meta(reasoning_active=False, last_reasoning_step="Idle")
         hui = getattr(self, "_hui_window", None)
         if hui:

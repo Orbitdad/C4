@@ -103,6 +103,17 @@ class Executor:
             
         app_clean = app.translate(str.maketrans("", "", string.punctuation)).strip().lower()
         
+        # Chrome Profile Integration
+        is_chrome = any(name in app_clean for name in ["chrome", "google chrome"])
+        profile_dir = None
+        if is_chrome:
+            profiles = self._get_chrome_profiles()
+            # Try to find a profile name in the query
+            for p_name, p_dir in profiles.items():
+                if p_name in app_clean:
+                    profile_dir = p_dir
+                    break
+
         # Map common names to executables
         mapping = {
             "code": "code",
@@ -121,21 +132,62 @@ class Executor:
         }
         exe = mapping.get(app_clean, app_clean)
         
+        # If it's chrome and we still have the full app name as 'chrome', 
+        # but a profile was found, ensure we use 'chrome'
+        if is_chrome:
+            exe = "chrome" if platform.system() == "Windows" else "google-chrome"
+
         try:
             if platform.system() == "Windows":
-                # If it's a known executable with an extension, or in PATH, or mapped
-                if exe.endswith(".exe") or shutil.which(exe):
+                # Special handling for Chrome profiles
+                if is_chrome and profile_dir:
+                    cmd = f'start chrome --profile-directory="{profile_dir}"'
+                    subprocess.Popen(cmd, shell=True)
+                # Standard app opening
+                elif exe.endswith(".exe") or shutil.which(exe):
                     os.startfile(exe) if "." in exe else subprocess.Popen([exe], shell=True)
                 else:
                     # Windows 'start' searches registry App Paths, useful for unmapped installed software
                     subprocess.Popen(f"start {exe}", shell=True)
             else:
-                subprocess.Popen([exe], start_new_session=True)
+                # Linux/Mac
+                cmd_args = [exe]
+                if is_chrome and profile_dir:
+                    cmd_args.append(f'--profile-directory={profile_dir}')
+                subprocess.Popen(cmd_args, start_new_session=True)
                 
-            log_action("open_app", {"app": app})
-            return {"success": True, "message": f"Opened {app}."}
+            log_action("open_app", {"app": app, "profile": profile_dir})
+            return {"success": True, "message": f"Opened {app}." if not profile_dir else f"Opening {app} using the {profile_dir} profile."}
         except Exception as e:
             return {"success": False, "message": f"Failed to open {app}. Error: {str(e)}"}
+
+    def _get_chrome_profiles(self) -> Dict[str, str]:
+        """Maps lowercase display names to internal directory names (Windows/Linux/Mac)."""
+        import os
+        import json
+        profiles_map = {}
+        try:
+            if platform.system() == "Windows":
+                path = os.path.expandvars(r'%LOCALAPPDATA%\Google\Chrome\User Data\Local State')
+            elif platform.system() == "Darwin":
+                path = os.path.expanduser('~/Library/Application Support/Google/Chrome/Local State')
+            else:
+                path = os.path.expanduser('~/.config/google-chrome/Local State')
+
+            if not os.path.exists(path):
+                return {}
+
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            info_cache = data.get('profile', {}).get('info_cache', {})
+            for dir_name, info in info_cache.items():
+                display_name = info.get('name', '').lower()
+                if display_name:
+                    profiles_map[display_name] = dir_name
+        except Exception as e:
+            logger.debug(f"Failed to parse Chrome profiles: {e}")
+        return profiles_map
 
     def _open_url(self, params: Dict[str, Any]) -> Dict[str, Any]:
         url = params.get("url", "")
