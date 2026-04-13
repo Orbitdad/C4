@@ -1,0 +1,100 @@
+app:
+  name: "JARVIS"
+  locale: "en-IN"                      # Broad Indian English/Mix
+  dry_run: false
+
+voice:
+  wake_word_enabled: true
+  wake_word: "c4"
+  input:
+    backend: "speech_recognition"
+    energy_threshold: 300
+    pause_threshold: 0.8
+    language: "en-IN"                  # Primary listening language (en-IN, hi-IN, mr-IN)
+  output:
+    backend: "edge"                    # "edge" | "pyttsx3" | "elevenlabs"
+    edge_voice: "en-GB-RyanNeural"     # Deep British male — the JARVIS voice
+    edge_rate: "+10%"                  # Slightly faster for responsiveness
+    edge_pitch: "-8Hz"                 # Slightly deeper
+    voices:
+      en: "en-GB-RyanNeural"
+      hi: "hi-IN-MadhurNeural"
+      mr: "mr-IN-ManoharNeural"
+    rate: 200                          # pyttsx3 fallback rate
+    volume: 0.95
+    # elevenlabs_api_key: "YOUR_KEY_HERE"   # Uncomment for premium voice
+    # elevenlabs_voice_id: "pNInz6obpgDQGcFmaJgB"  # Adam voice
+
+llm:
+  provider: "ollama"
+  ollama_host: "http://localhost:11434"
+  max_tokens: 4096
+  default_role: "explainer"
+  embed_model: "nomic-embed-text"
+  roles:
+    planner:
+      model: "llama3.2"
+      options:
+        temperature: 0.2
+        num_ctx: 4096
+        num_predict: 4096
+    coder:
+      model: "codeqwen"              # 4.2 GB — instruction-following code model
+      options:
+        temperature: 0.15
+        num_ctx: 8192
+        num_predict: 8192
+    webgen:
+      model: "codeqwen"              # dedicated HTML/CSS/JS generation
+      options:
+        temperature: 0.25            # slight creativity for design variety
+        num_ctx: 12288
+        num_predict: 8192
+    debugger:
+      model: "deepseek-coder"        # fast 1.3B for diffs/patches only
+      options:
+        temperature: 0.1
+        num_ctx: 8192
+        num_predict: 8192
+    explainer:
+      model: "llama3.2"
+      options:
+        temperature: 0.3
+        num_ctx: 4096
+        num_predict: 2048
+
+memory:
+  base_dir: "data/memory"
+  enabled: true
+
+vision:
+  face_recognition_threshold: 0.45
+
+gesture:
+  enabled: true
+  smoothing: 5.0
+  pinch_threshold: 0.05
+  click_cooldown: 0.5
+  frame_margin_x: 0.2
+  frame_margin_y: 0.2
+  velocity_precision_threshold: 0.30
+  velocity_fast_threshold: 1.50
+  macros_path: "jarvis/vision/gesture/gesture_macros.yaml"
+  adaptive:
+    enabled: true
+    profile_path: "data/gesture_profile.json"
+
+learning:
+  enabled: true
+  suggest_automation: true
+  min_pattern_support: 3
+
+safety:
+  dry_run: false
+  confirm_deletes: true
+  require_confirmation_for_delete: true
+
+logging:
+  level: "INFO"
+  file: "logs/jarvis.log"
+  learning_file: "logs/learning.log"

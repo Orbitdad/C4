@@ -1,0 +1,9 @@
+{
+  "hand_width": 0.086,
+  "hand_height": 0.2929,
+  "sensitivity": 1.0,
+  "pinch_threshold": 0.05,
+  "smoothing": 5.0,
+  "calibrated": true,
+  "samples_collected": 4140
+}

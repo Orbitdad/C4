@@ -1,0 +1,78 @@
+
+── GestureDetector ───────────────────────────────────────────────────
+  ✅  MOVE classified
+  ✅  MOVE confidence ≥ 0.5
+  ✅  SCROLL classified
+  ❌  PINCH classified   (got: FIST)
+  ✅  PINCH confidence > 0.8
+  ✅  FIST classified
+  ✅  OPEN_PALM classified
+  ✅  detect() returns position tuple
+  ✅  detect() returns velocity float
+  ✅  SWIPE_RIGHT detected
+  ✅  SWIPE_UP detected
+
+── GestureStateManager ─────────────────────────────────────────────────
+  ✅  IDLE→ACTIVE on MOVE
+  ✅  Sequence contains MOVE
+  ✅  ACTIVE→DRAGGING on PINCH
+  ✅  IDLE→SCROLLING on SCROLL
+  ✅  Any→IDLE on FIST
+  ✅  Low confidence → stays IDLE
+  ✅  Reset clears state+history
+
+── IntentEngine ────────────────────────────────────────────────────────
+  ✅  PINCH → CLICK intent
+  ✅  slow velocity → PRECISION
+  ✅  MOVE+fast → NAVIGATE intent
+  ✅  fast velocity → FAST mode
+  ✅  SCROLL → SCROLL intent
+  ✅  mid velocity → NORMAL mode
+  ✅  FIST → PAUSE intent
+  ✅  calculate_velocity > 0
+
+── ContextEngine ───────────────────────────────────────────────────────
+  ✅  VLC → media type
+  ✅  Chrome → browser type
+  ✅  PINCH in media → PLAY_PAUSE
+  ✅  SWIPE_LEFT in browser → BROWSER_BACK
+  ✅  MOVE in media → no override (None)
+
+── MacroEngine ─────────────────────────────────────────────────────────
+  ✅  Macros loaded > 0
+  ✅  App keywords loaded
+  ✅  FIST matches 'Pause JARVIS' macro
+  ✅  PINCH in media matches 'Play / Pause'
+  ✅  MOVE has no macro match
+  ✅  FIST matches even as tail of sequence
+
+── AdaptiveEngine ──────────────────────────────────────────────────────
+  ❌  Starts uncalibrated   (got: None)
+  ✅  Default pinch threshold
+  ✅  Calibrated after enough frames
+  ❌  Hand width computed > 0   (got: None)
+  ✅  Low light increases pinch threshold
+  ✅  normalize() returns same object when uncalibrated
+
+── FusionEngine ────────────────────────────────────────────────────────
+  ✅  Macro has highest priority
+  ✅  Macro priority == PRI_MACRO
+  ✅  Context beats intent for PINCH in media
+  ✅  Context priority == PRI_CONTEXT
+  ✅  Intent candidate produced for MOVE
+  ✅  Fallback for FIST → BUS action
+  ✅  Fallback priority == PRI_FALLBACK
+
+── Full Pipeline (GestureController) ────────────────────────────────────
+  ✅  Pipeline: MOVE → action dict returned
+  ✅  Pipeline: MOVE → has 'action' key
+  ✅  Pipeline: PINCH → action dict returned
+  ✅  Pipeline: SCROLL → action dict returned
+  ✅  Pipeline: FIST → action dict returned
+  ✅  Pipeline: gc.enabled flag works (True)
+  ✅  Pipeline: disabled → returns None
+
+────────────────────────────────────────────────────────────
+Results: 54/57 passed   ❌ 3 FAILED
+MacroEngine: action failed in 'Pause JARVIS' — '<' not supported between instances of 'SystemEvent' and 'SystemEvent'
+MacroEngine: action failed in 'Pause JARVIS' — '<' not supported between instances of 'SystemEvent' and 'SystemEvent'

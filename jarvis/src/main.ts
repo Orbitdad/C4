@@ -1,1 +1,0 @@
-I generated the code and typed it into your current window, sir.

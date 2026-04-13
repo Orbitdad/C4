@@ -1,0 +1,47 @@
+```javascript
+{
+  "name": "Futuristic Portfolio Website",
+  "type": "web",
+  "stack": "vanilla html, css, javascript",
+  "package_manager": "npm",
+  "language": "javascript"
+}
+{
+  "root": ".",
+  "assume_existing": true
+}
+{
+  "path": "index.html",
+  "mode": "create",
+  "purpose": "main entry point",
+  "depends_on": []
+},
+{
+  "path": "package.json",
+  "mode": "update",
+  "purpose": "project metadata",
+  "depends_on": [
+    "vite.config.js"
+  ]
+},
+{
+  "path": "vite.config.js",
+  "mode": "update",
+  "purpose": "build configuration",
+  "depends_on": []
+},
+{
+  "path": "src/App.tsx",
+  "mode": "create",
+  "purpose": "main application component",
+  "depends_on": []
+},
+{
+  "path": "src/styles/minimal_styles.css",
+  "mode": "update",
+  "purpose": "global styles",
+  "depends_on": [
+    "vite.config.js"
+  ]
+}
+```

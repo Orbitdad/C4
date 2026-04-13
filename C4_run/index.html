@@ -1,0 +1,74 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><futuristic portfolio website></title>
+    <link rel="stylesheet" href="minimal_styles.css">
+</head>
+<body>
+    <header class="glassmorphism-header">
+        <nav class="glassmorphism-nav">
+            <ul>
+                <li><a href="#">Home</a></li>
+                <li><a href="#">About</a></li>
+                <li><a href="#">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main class="glassmorphism-main">
+        <section class="glassmorphism-section">
+            <h1>Welcome to my portfolio website!</h1>
+            <p>This is a sample paragraph of text. You can add more paragraphs as needed.</p>
+        </section>
+        <section class="glassmorphism-section">
+            <h2>Features</h2>
+            <ul>
+                <li>Feature 1</li>
+                <li>Feature 2</li>
+                <li>Feature 3</li>
+            </ul>
+        </section>
+    </main>
+    <script src="App.tsx"></script>
+</body>
+</html>
+
+// package.json
+{
+    "name": "<futuristic portfolio website>",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.html",
+    "scripts": {
+        "build": "vite build",
+        "start": "vite serve"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "@types/node": "^17.0.34",
+        "@types/vite": "^1.5.46",
+        "vite": "^2.9.7"
+    }
+}
+
+// vite.config.js
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+    base: './',
+    build: {
+        sourcemap: true,
+        outDir: 'dist'
+    },
+    plugins: [],
+    resolve: {
+        alias: {
+            '@': require.resolve('vue/dist/vue.esm-bundled.js')
+        }
+    }
+});
+```
