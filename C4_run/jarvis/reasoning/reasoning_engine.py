@@ -341,6 +341,32 @@ class ReasoningEngine:
                     history=context.to_prompt_history()
                 )
                 return ReasoningResponse(spoken_response=response if response else status)
+            
+            if intent.parsed_action == "global_news_summary":
+                prompt = "Provide a concise, real-time style summary of current worldwide events. Start with a headline tone, give 3-5 bullet points, and be informative. Do NOT mention URLs or system actions. Be natural and human-like."
+                summary = self.llm.generate(
+                    prompt,
+                    system_message=self._get_dynamic_system_prompt(),
+                    history=context.to_prompt_history()
+                )
+                if not summary:
+                    summary = "I'm having trouble retrieving the news right now."
+                    
+                spoken = f"{summary}\n\nFor more detailed live updates, opening WorldMonitor."
+                
+                plan = Plan(
+                    steps=[MemoryActionStep(type="open_app", params={"app": "world monitor", "query": "world monitor"})],
+                    summary="Open WorldMonitor"
+                )
+                if self.executor:
+                    for step in plan.steps:
+                        self.executor.execute_step(step)
+                
+                return ReasoningResponse(
+                    spoken_response=spoken,
+                    last_action={"path": "global_news_summary", "plan": plan.to_dict()}
+                )
+
             return self._handle_command(intent, context)
 
         # Questions: use LLM

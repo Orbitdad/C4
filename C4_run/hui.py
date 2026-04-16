@@ -24,7 +24,7 @@ from collections import deque
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget,
     QTextEdit, QHBoxLayout, QGridLayout, QFrame, QProgressBar,
-    QSizePolicy
+    QSizePolicy, QSizeGrip
 )
 from PyQt5.QtCore import (
     QTimer, Qt, pyqtSignal, QObject, QRectF, QPointF,
@@ -617,7 +617,7 @@ class HUIDashboard(QMainWindow):
     def __init__(self):
         print("HUI: Initializing C4 HUI...")
         super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowMaximizeButtonHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         self.signals = HUISignals()
@@ -664,37 +664,74 @@ class HUIDashboard(QMainWindow):
         self._current_jarvis_text = ""
 
         self.init_ui()
+        self.showMaximized()
         print("HUI: C4 Core Ready.")
 
     def init_ui(self):
         self.setWindowTitle("C4 INTELLIGENCE SYSTEM")
-        self.setGeometry(0, 0, 1600, 950)
 
         central_widget = QWidget()
+        central_widget.setMouseTracking(True)
         self.setCentralWidget(central_widget)
         central_widget.setStyleSheet("""
             QWidget {
-                background-color: rgba(1, 6, 12, 248);
+                background-color: rgba(2, 6, 15, 252);
                 color: #00d2ff;
                 font-family: 'Consolas', 'Courier New';
-                /* Scanline visual effect */
-                background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 210, 255, 0.03) 2px, rgba(0, 210, 255, 0.03) 4px);
             }
             QFrame#Panel {
-                border: 1px solid rgba(0, 210, 255, 70);
-                background-color: rgba(2, 12, 25, 160);
-                border-radius: 3px;
+                border: 1px solid rgba(0, 210, 255, 55);
+                background-color: rgba(3, 14, 30, 200);
+                border-radius: 8px;
+            }
+            QFrame#TopBar {
+                background-color: rgba(0, 8, 20, 230);
+                border-bottom: 1px solid rgba(0, 210, 255, 80);
             }
             QFrame#PanelActive {
                 border: 2px solid rgba(0, 255, 255, 200);
                 background-color: rgba(0, 40, 80, 60);
-                border-radius: 3px;
+                border-radius: 8px;
+            }
+            QPushButton#WinCtrl {
+                color: #00d2ff;
+                background: transparent;
+                border: 1px solid rgba(0,210,255,50);
+                border-radius: 4px;
+                font-family: 'Consolas';
+                font-size: 13px;
+                padding: 2px 8px;
+            }
+            QPushButton#WinCtrl:hover {
+                background: rgba(0, 210, 255, 30);
+                border-color: rgba(0, 255, 255, 180);
+            }
+            QPushButton#WinCtrlClose {
+                color: #ff4455;
+                background: transparent;
+                border: 1px solid rgba(255, 68, 85, 60);
+                border-radius: 4px;
+                font-family: 'Consolas';
+                font-size: 13px;
+                padding: 2px 8px;
+            }
+            QPushButton#WinCtrlClose:hover {
+                background: rgba(255, 68, 85, 40);
+                border-color: #ff4455;
             }
             QLabel#Title {
                 font-weight: bold;
-                letter-spacing: 3px;
+                letter-spacing: 4px;
                 color: #00ffff;
-                font-size: 11px;
+                font-size: 12px;
+            }
+            QLabel#PanelHeader {
+                font-weight: bold;
+                letter-spacing: 3px;
+                color: rgba(0, 220, 255, 180);
+                font-size: 10px;
+                padding: 2px 0px 6px 0px;
+                border-bottom: 1px solid rgba(0, 210, 255, 40);
             }
             QTextEdit {
                 background: transparent;
@@ -702,184 +739,277 @@ class HUIDashboard(QMainWindow):
                 color: #00ffcc;
                 font-size: 11px;
             }
+            QScrollBar:vertical {
+                background: rgba(0, 20, 40, 100);
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(0, 210, 255, 120);
+                border-radius: 3px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
 
-        layout = QGridLayout(central_widget)
-        layout.setSpacing(10)
-        layout.setContentsMargins(15, 15, 15, 15)
-        self.panels = {}
+        root_layout = QVBoxLayout(central_widget)
+        root_layout.setSpacing(0)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        # ── CUSTOM TOP BAR ─────────────────────────────────────────────────────
+        from PyQt5.QtWidgets import QPushButton
+        topbar = QFrame()
+        topbar.setObjectName("TopBar")
+        topbar.setFixedHeight(52)
+        topbar_layout = QHBoxLayout(topbar)
+        topbar_layout.setContentsMargins(20, 0, 12, 0)
+        topbar_layout.setSpacing(14)
+
+        self.status_orb = StatusOrb()
+        topbar_layout.addWidget(self.status_orb)
+
+        title_lbl = QLabel("C4  ◈  INTELLIGENCE  SYSTEM  ◈  GLOBAL  COMMAND")
+        title_lbl.setObjectName("Title")
+        title_lbl.setFont(QFont("Consolas", 15, QFont.Bold))
+        topbar_layout.addWidget(title_lbl)
+        topbar_layout.addStretch()
+
+        self.waveform = JARVISWaveform()
+        self.waveform.setMaximumWidth(320)
+        topbar_layout.addWidget(self.waveform)
+        topbar_layout.addStretch()
+
+        self.clock_label = QLabel("00:00:00")
+        self.clock_label.setFont(QFont("Consolas", 18, QFont.Bold))
+        self.clock_label.setStyleSheet("color: #00ffcc;")
+        topbar_layout.addWidget(self.clock_label)
+
+        self.ai_status_label = QLabel("  INITIALIZING")
+        self.ai_status_label.setFont(QFont("Consolas", 9))
+        self.ai_status_label.setStyleSheet("color: #4499aa; letter-spacing: 2px;")
+        topbar_layout.addWidget(self.ai_status_label)
+
+        topbar_layout.addSpacing(18)
+        
+        btn_min = QPushButton("─")
+        btn_min.setObjectName("WinCtrl")
+        btn_min.setFixedSize(30, 24)
+        btn_min.clicked.connect(self.showMinimized)
+        topbar_layout.addWidget(btn_min)
+
+        btn_max = QPushButton("□")
+        btn_max.setObjectName("WinCtrl")
+        btn_max.setFixedSize(30, 24)
+        btn_max.clicked.connect(self._toggle_maximize)
+        topbar_layout.addWidget(btn_max)
+
+        btn_close = QPushButton("✕")
+        btn_close.setObjectName("WinCtrlClose")
+        btn_close.setFixedSize(30, 24)
+        btn_close.clicked.connect(self.close)
+        topbar_layout.addWidget(btn_close)
+
+        root_layout.addWidget(topbar)
 
         # ── TOP ALERT BANNER ──────────────────────────────────────────────────
         self.alert_banner = AlertBanner()
-        layout.addWidget(self.alert_banner, 0, 0, 1, 4)
+        root_layout.addWidget(self.alert_banner)
 
-        # ── HEADER ────────────────────────────────────────────────────────────
-        header = QFrame()
-        header.setObjectName("Panel")
-        self.panels["header"] = header
-        header_layout = QHBoxLayout(header)
-        header_layout.setSpacing(12)
+        # ── MAIN CONTENT AREA ─────────────────────────────────────────────────
+        content_widget = QWidget()
+        content_widget.setMouseTracking(True)
+        root_layout.addWidget(content_widget, 1)
 
-        # Left: Status orb + title
-        left_hbox = QHBoxLayout()
-        self.status_orb = StatusOrb()
-        left_hbox.addWidget(self.status_orb)
-        left_hbox.setAlignment(Qt.AlignVCenter)
-        title_lbl = QLabel("C4  INTELLIGENCE  SYSTEM  ::  GLOBAL  COMMAND")
-        title_lbl.setObjectName("Title")
-        title_lbl.setFont(QFont("Consolas", 18, QFont.Bold))
-        left_hbox.addWidget(title_lbl)
-        header_layout.addLayout(left_hbox)
-        header_layout.addStretch()
+        layout = QGridLayout(content_widget)
+        layout.setSpacing(14)
+        layout.setContentsMargins(18, 12, 18, 14)
+        self.panels = {}
+        self._drag_topbar = topbar  # used for dragging detect
 
-        # Center: JARVIS waveform
-        waveform_layout = QVBoxLayout()
-        waveform_layout.setAlignment(Qt.AlignCenter)
-        self.waveform = JARVISWaveform()
-        waveform_layout.addWidget(self.waveform)
-        header_layout.addLayout(waveform_layout)
-        header_layout.addStretch()
+        # Column stretch: vision | center-left | center-right | system
+        layout.setColumnStretch(0, 28)   # vision feed — wide
+        layout.setColumnStretch(1, 22)   # globe/metrics
+        layout.setColumnStretch(2, 22)   # radar/network
+        layout.setColumnStretch(3, 28)   # system diagnostics — wide
 
-        # Right: Clock + status label
-        right_vbox = QVBoxLayout()
-        right_vbox.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.clock_label = QLabel("00:00:00")
-        self.clock_label.setFont(QFont("Consolas", 20, QFont.Bold))
-        self.clock_label.setStyleSheet("color: #00ffcc;")
-        right_vbox.addWidget(self.clock_label)
-        self.ai_status_label = QLabel("INITIALIZING...")
-        self.ai_status_label.setFont(QFont("Consolas", 10))
-        self.ai_status_label.setStyleSheet("color: #4499aa;")
-        right_vbox.addWidget(self.ai_status_label)
-        header_layout.addLayout(right_vbox)
-
-        layout.addWidget(header, 1, 0, 1, 4)
+        # Row stretch
+        layout.setRowStretch(0, 42)   # main panels
+        layout.setRowStretch(1, 28)   # gauges row  
+        layout.setRowStretch(2, 30)   # interaction log
 
         # ── VISION PANEL ──────────────────────────────────────────────────────
         vision_panel = QFrame()
         vision_panel.setObjectName("Panel")
         self.panels["vision"] = vision_panel
         vision_layout = QVBoxLayout(vision_panel)
-        lbl_v = QLabel("◤ VISION MATRIX ◥")
-        lbl_v.setObjectName("Title")
+        vision_layout.setContentsMargins(12, 10, 12, 10)
+        vision_layout.setSpacing(6)
+        lbl_v = QLabel("◈  VISION MATRIX")
+        lbl_v.setObjectName("PanelHeader")
         vision_layout.addWidget(lbl_v)
         self.vision_label = QLabel("INITIALIZING SENSORS...")
         self.vision_label.setAlignment(Qt.AlignCenter)
-        self.vision_label.setMinimumSize(380, 280)
-        self.vision_label.setStyleSheet("background: rgba(0,5,10,200); border: 1px solid rgba(0,210,255,40);")
-        vision_layout.addWidget(self.vision_label)
+        self.vision_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.vision_label.setStyleSheet(
+            "background: rgba(0,4,10,220); "
+            "border: 1px solid rgba(0,210,255,35); "
+            "border-radius: 6px; color: rgba(0,210,255,120); font-size:11px;"
+        )
+        vision_layout.addWidget(self.vision_label, 1)
         self._face_lbl = QLabel("")
         self._face_lbl.setFont(QFont("Consolas", 10))
         self._face_lbl.setStyleSheet("color: #00ff88;")
         self._face_lbl.setAlignment(Qt.AlignCenter)
         vision_layout.addWidget(self._face_lbl)
-        
-        # Gesture telemetry labels
-        self._gesture_lbl = QLabel("GESTURE: IDLE | MODE: SINGLE_HAND")
-        self._gesture_lbl.setFont(QFont("Consolas", 10))
+        self._gesture_lbl = QLabel("GESTURE: IDLE  |  MODE: SINGLE_HAND")
+        self._gesture_lbl.setFont(QFont("Consolas", 9))
         self._gesture_lbl.setStyleSheet("color: #00d2ff;")
         self._gesture_lbl.setAlignment(Qt.AlignCenter)
         vision_layout.addWidget(self._gesture_lbl)
-        
-        self._metrics_lbl = QLabel("Z: -- | ROLL: -- | CONF: --")
-        self._metrics_lbl.setFont(QFont("Consolas", 10))
+        self._metrics_lbl = QLabel("Z: --  |  ROLL: --  |  CONF: --")
+        self._metrics_lbl.setFont(QFont("Consolas", 9))
         self._metrics_lbl.setStyleSheet("color: #0088ff;")
         self._metrics_lbl.setAlignment(Qt.AlignCenter)
         vision_layout.addWidget(self._metrics_lbl)
-        
-        layout.addWidget(vision_panel, 2, 0, 2, 1)
+        layout.addWidget(vision_panel, 0, 0, 2, 1)
 
         # ── GLOBE + RADAR ──────────────────────────────────────────────────────
         globe_panel = QFrame()
         globe_panel.setObjectName("Panel")
         self.panels["globe"] = globe_panel
         globe_layout = QHBoxLayout(globe_panel)
+        globe_layout.setContentsMargins(12, 10, 12, 10)
+        globe_layout.setSpacing(10)
         globe_vbox = QVBoxLayout()
-        lbl_g = QLabel("◤ GLOBAL ASSETS ◥")
-        lbl_g.setObjectName("Title")
+        lbl_g = QLabel("◈  GLOBAL ASSETS")
+        lbl_g.setObjectName("PanelHeader")
         globe_vbox.addWidget(lbl_g)
         self.globe = WireframeGlobeHUD()
-        globe_vbox.addWidget(self.globe)
+        self.globe.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        globe_vbox.addWidget(self.globe, 1)
         globe_layout.addLayout(globe_vbox)
         radar_vbox = QVBoxLayout()
-        lbl_r = QLabel("◤ SECURE SOCKET RADAR ◥")
-        lbl_r.setObjectName("Title")
+        lbl_r = QLabel("◈  SOCKET RADAR")
+        lbl_r.setObjectName("PanelHeader")
         radar_vbox.addWidget(lbl_r)
         self.radar = RadarHUD()
-        radar_vbox.addWidget(self.radar)
+        self.radar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        radar_vbox.addWidget(self.radar, 1)
         globe_layout.addLayout(radar_vbox)
-        layout.addWidget(globe_panel, 2, 1, 1, 2)
+        layout.addWidget(globe_panel, 0, 1, 1, 2)
 
         # ── SYSTEM DIAGNOSTICS ────────────────────────────────────────────────
         sys_panel = QFrame()
         sys_panel.setObjectName("Panel")
         self.panels["system"] = sys_panel
         sys_layout = QVBoxLayout(sys_panel)
-        lbl_s = QLabel("◤ SYSTEM DIAGNOSTICS ◥")
-        lbl_s.setObjectName("Title")
+        sys_layout.setContentsMargins(12, 10, 12, 10)
+        sys_layout.setSpacing(8)
+        lbl_s = QLabel("◈  SYSTEM DIAGNOSTICS")
+        lbl_s.setObjectName("PanelHeader")
         sys_layout.addWidget(lbl_s)
         self.hardware_info = HardwareSensorsHUD()
         sys_layout.addWidget(self.hardware_info)
-        sys_layout.addWidget(QLabel(""))
-        lbl_p = QLabel("◤ ACTIVE PROCESSES ◥")
-        lbl_p.setObjectName("Title")
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background: rgba(0,210,255,30); margin: 4px 0px;")
+        sys_layout.addWidget(sep)
+        lbl_p = QLabel("◈  ACTIVE PROCESSES")
+        lbl_p.setObjectName("PanelHeader")
         sys_layout.addWidget(lbl_p)
         self.process_monitor = ProcessMonitorHUD()
-        sys_layout.addWidget(self.process_monitor)
-        layout.addWidget(sys_panel, 2, 3, 2, 1)
+        self.process_monitor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        sys_layout.addWidget(self.process_monitor, 1)
+        layout.addWidget(sys_panel, 0, 3, 2, 1)
 
         # ── METRICS GAUGES ────────────────────────────────────────────────────
         metrics_panel = QFrame()
         metrics_panel.setObjectName("Panel")
         self.panels["metrics"] = metrics_panel
-        metrics_layout = QHBoxLayout(metrics_panel)
+        metrics_layout = QVBoxLayout(metrics_panel)
+        metrics_layout.setContentsMargins(12, 10, 12, 10)
+        metrics_layout.setSpacing(8)
+        lbl_m = QLabel("◈  CORE VITALS")
+        lbl_m.setObjectName("PanelHeader")
+        metrics_layout.addWidget(lbl_m)
+        gauges_row = QHBoxLayout()
         self.cpu_gauge = CircularGauge("CPU CORE")
         self.ram_gauge = CircularGauge("SYS RAM")
         self.disk_gauge = CircularGauge("SSD VOL", color="#ff00cc")
         self.arc_reactor = ArcReactorHUD()
-        
-        metrics_layout.addWidget(self.cpu_gauge)
-        metrics_layout.addWidget(self.arc_reactor)
-        metrics_layout.addWidget(self.ram_gauge)
-        metrics_layout.addWidget(self.disk_gauge)
-        layout.addWidget(metrics_panel, 3, 1, 1, 1)
+        self.arc_reactor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        gauges_row.addWidget(self.cpu_gauge)
+        gauges_row.addWidget(self.arc_reactor)
+        gauges_row.addWidget(self.ram_gauge)
+        gauges_row.addWidget(self.disk_gauge)
+        metrics_layout.addLayout(gauges_row, 1)
+        layout.addWidget(metrics_panel, 1, 1, 1, 1)
 
         # ── NETWORK CHART ─────────────────────────────────────────────────────
         chart_panel = QFrame()
         chart_panel.setObjectName("Panel")
         self.panels["network"] = chart_panel
         chart_layout = QVBoxLayout(chart_panel)
-        lbl_n = QLabel("◤ NETWORK BANDWIDTH SIGNAL ◥")
-        lbl_n.setObjectName("Title")
+        chart_layout.setContentsMargins(12, 10, 12, 10)
+        chart_layout.setSpacing(8)
+        lbl_n = QLabel("◈  NETWORK BANDWIDTH")
+        lbl_n.setObjectName("PanelHeader")
         chart_layout.addWidget(lbl_n)
         self.net_chart = BarChartHUD()
-        chart_layout.addWidget(self.net_chart)
-        layout.addWidget(chart_panel, 3, 2, 1, 1)
+        self.net_chart.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        chart_layout.addWidget(self.net_chart, 1)
+        layout.addWidget(chart_panel, 1, 2, 1, 1)
 
         # ── TRANSCRIPT + COMMAND LOG ─────────────────────────────────────────
         log_panel = QFrame()
         log_panel.setObjectName("Panel")
         self.panels["log"] = log_panel
-        log_layout = QVBoxLayout(log_panel)
-        log_layout.setSpacing(6)
+        log_layout = QHBoxLayout(log_panel)
+        log_layout.setContentsMargins(14, 10, 14, 10)
+        log_layout.setSpacing(14)
 
-        # Transcript top section
+        # Left: Interaction transcript
+        transcript_col = QVBoxLayout()
+        transcript_col.setSpacing(6)
+        lbl_t = QLabel("◈  INTERACTION LOG")
+        lbl_t.setObjectName("PanelHeader")
+        transcript_col.addWidget(lbl_t)
         self.transcript_panel = TranscriptPanel()
-        log_layout.addWidget(self.transcript_panel)
+        self.transcript_panel.setMaximumHeight(9999)  # allow expand
+        self.transcript_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.transcript_panel._text.setMaximumHeight(9999)
+        transcript_col.addWidget(self.transcript_panel, 1)
+        log_layout.addLayout(transcript_col, 2)
 
-        # Explanation line
+        # Vertical separator
+        vsep = QFrame()
+        vsep.setFixedWidth(1)
+        vsep.setStyleSheet("background: rgba(0,210,255,30);")
+        log_layout.addWidget(vsep)
+
+        # Right: Explain label + raw log
+        log_col = QVBoxLayout()
+        log_col.setSpacing(6)
+        lbl_l = QLabel("◈  SYSTEM LOG")
+        lbl_l.setObjectName("PanelHeader")
+        log_col.addWidget(lbl_l)
         self.explain_label = QLabel("C4 :: Awaiting instruction...")
-        self.explain_label.setStyleSheet("color: #ffcc00; font-size: 12px; font-style: italic;")
+        self.explain_label.setStyleSheet(
+            "color: #ffcc00; font-size: 11px; font-style: italic; "
+            "padding: 4px 8px; background: rgba(40,30,0,60); "
+            "border: 1px solid rgba(255,200,0,30); border-radius: 4px;"
+        )
         self.explain_label.setWordWrap(True)
-        log_layout.addWidget(self.explain_label)
-
-        # Log text
+        log_col.addWidget(self.explain_label)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(100)
-        log_layout.addWidget(self.log_text)
+        self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        log_col.addWidget(self.log_text, 1)
+        log_layout.addLayout(log_col, 3)
 
-        layout.addWidget(log_panel, 4, 0, 1, 4)
+        layout.addWidget(log_panel, 2, 0, 1, 4)
+        
+        # Resize grip
+        layout.addWidget(QSizeGrip(central_widget), 2, 3, Qt.AlignBottom | Qt.AlignRight)
 
         # ── TIMERS ────────────────────────────────────────────────────────────
         self.stats_timer = QTimer()
@@ -888,6 +1018,12 @@ class HUIDashboard(QMainWindow):
 
         # Kick off boot sequence
         QTimer.singleShot(200, self._start_boot_sequence)
+
+    def _toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     # ── Boot Sequence ─────────────────────────────────────────────────────────
 
@@ -898,7 +1034,7 @@ class HUIDashboard(QMainWindow):
         for panel in self.panels.values():
             panel.setVisible(False)
 
-        boot_order = ["header", "system", "vision", "metrics", "network", "globe", "log"]
+        boot_order = ["system", "vision", "globe", "metrics", "network", "log"]
         delay = 0
         for i, name in enumerate(boot_order):
             delay += 220
@@ -1025,10 +1161,53 @@ class HUIDashboard(QMainWindow):
 
     # ── Mouse / Gesture Interaction ───────────────────────────────────────────
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Only initiate drag when clicking directly on topbar
+            topbar = getattr(self, '_drag_topbar', None)
+            if topbar and topbar.geometry().contains(event.pos()):
+                self._drag_pos = event.globalPos()
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if hasattr(self, '_drag_pos'):
+                del self._drag_pos
+            event.accept()
+
     def mouseMoveEvent(self, event):
+        # 1) Window dragging logic
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag_pos'):
+            curr_pos = event.globalPos()
+            diff = curr_pos - self._drag_pos
+            self.move(self.pos() + diff)
+            self._drag_pos = curr_pos
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+        
+        # 2) Landmarks & Ripples update
         lx = event.x() / self.width()
         ly = event.y() / self.height()
         self._update_landmarks([(lx, ly)])
+
+        # 3) Parallax depth effect based on mouse pos
+        cx, cy = self.width() / 2, self.height() / 2
+        dx, dy = event.x() - cx, event.y() - cy
+        
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        for name, panel in self.panels.items():
+            if not panel: continue
+            effect = panel.graphicsEffect()
+            if not isinstance(effect, QGraphicsDropShadowEffect):
+                effect = QGraphicsDropShadowEffect()
+                effect.setBlurRadius(15)
+                effect.setColor(QColor(0, 210, 255, 60))
+                panel.setGraphicsEffect(effect)
+            
+            depth_multiplier = -0.05 if name in ['globe', 'vision'] else -0.02
+            effect.setOffset(dx * depth_multiplier, dy * depth_multiplier)
 
     def _update_landmarks(self, lms):
         self.landmarks = lms
@@ -1165,27 +1344,6 @@ class HUIDashboard(QMainWindow):
         if random.random() < 0.15:
             self.radar.refresh_network()
 
-
-    def mouseMoveEvent(self, event):
-        super().mouseMoveEvent(event)
-        # Parallax effect based on mouse pos
-        cx, cy = self.width() / 2, self.height() / 2
-        dx, dy = event.x() - cx, event.y() - cy
-        
-        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
-        for name, panel in self.panels.items():
-            if not panel: continue
-            effect = panel.graphicsEffect()
-            if not isinstance(effect, QGraphicsDropShadowEffect):
-                effect = QGraphicsDropShadowEffect()
-                effect.setBlurRadius(15)
-                # Cyan/blue shadow for holographic effect
-                effect.setColor(QColor(0, 210, 255, 60))
-                panel.setGraphicsEffect(effect)
-            
-            # Offset shadow to create 3D depth illusion (parallax)
-            depth_multiplier = -0.05 if name in ['header', 'globe'] else -0.02
-            effect.setOffset(dx * depth_multiplier, dy * depth_multiplier)
 
 def start_hui():
     app = QApplication(sys.argv)

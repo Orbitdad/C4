@@ -1,3 +1,4 @@
 {"id": "fact-e44ab5dbd72a", "category": "user", "key": "name", "value": "aadarsh", "source": "user", "confidence": 0.95, "created_at": "2026-02-19T15:15:56.832020+00:00", "last_used_at": null, "tags": [], "deleted": false}
 {"id": "fact-6e0bd458c55b", "category": "user", "key": "name", "value": "adarsh", "source": "user", "confidence": 0.95, "created_at": "2026-02-19T15:16:53.669165+00:00", "last_used_at": null, "tags": [], "deleted": false}
 {"id": "fact-e7b4ad3b3c8f", "category": "user", "key": "name", "value": "naitik", "source": "user", "confidence": 0.95, "created_at": "2026-03-17T20:37:57.461619+00:00", "last_used_at": null, "tags": [], "deleted": false}
+{"id": "fact-0b6b80c3c5ab", "category": "user", "key": "audio", "value": "muted how can i able to hear", "source": "user", "confidence": 0.95, "created_at": "2026-04-14T15:38:29.513287+00:00", "last_used_at": null, "tags": [], "deleted": false}

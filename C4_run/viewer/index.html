@@ -350,6 +350,41 @@
     .corner.tr { top: 6px; right: 6px; transform: scaleX(-1); }
     .corner.bl { bottom: 6px; left: 6px; transform: scaleY(-1); }
     .corner.br { bottom: 6px; right: 6px; transform: scale(-1); }
+
+    /* ═══════════════════════════════════════════════
+       VISION POINTER (Targeting Crosshair)
+    ═══════════════════════════════════════════════ */
+    #vision-pointer {
+      position: fixed;
+      top: 50%; left: 50%;
+      width: 20px; height: 20px;
+      margin-left: -10px; margin-top: -10px;
+      border: 2px solid var(--c4-teal);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.1s ease-out;
+      box-shadow: 0 0 10px var(--c4-teal);
+      background: rgba(0, 255, 204, 0.15);
+    }
+    #vision-pointer::after {
+       content: '';
+       position: absolute;
+       top: 50%; left: 50%;
+       width: 4px; height: 4px;
+       margin-left: -2px; margin-top: -2px;
+       background: var(--c4-teal);
+       border-radius: 50%;
+    }
+    #vision-pointer.active { opacity: 1; }
+    #vision-pointer.pinching { 
+      transform: scale(0.65); 
+      background: rgba(255, 60, 60, 0.5); 
+      border-color: #ff3c3c;
+      box-shadow: 0 0 15px #ff3c3c;
+    }
+    #vision-pointer.pinching::after { background: #ff3c3c; }
   </style>
 </head>
 <body>
@@ -426,6 +461,9 @@
 
   <!-- Error toast -->
   <div id="error-toast" role="alert" aria-live="assertive"></div>
+
+  <!-- Vision Pointer targeting reticle -->
+  <div id="vision-pointer" aria-hidden="true"></div>
 
   <!-- Three.js + GLTFLoader from CDN (no build step required) -->
   <script type="importmap">

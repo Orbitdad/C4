@@ -249,6 +249,18 @@ const SceneManager = (() => {
   function setPointerSync(x, y, gesture) {
       if (!AppState.modelLoaded) return;
       
+      const elPointer = document.getElementById('vision-pointer');
+      if (elPointer) {
+          elPointer.classList.add('active');
+          elPointer.style.left = (x * 100) + '%';
+          elPointer.style.top = (y * 100) + '%';
+          if (gesture === 'PINCH') {
+              elPointer.classList.add('pinching');
+          } else {
+              elPointer.classList.remove('pinching');
+          }
+      }
+
       // Override mouse tracker with ML vision coordinates
       mouse.x = (x * 2) - 1;
       mouse.y = -(y * 2) + 1;

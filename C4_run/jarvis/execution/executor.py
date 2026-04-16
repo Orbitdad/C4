@@ -94,72 +94,120 @@ class Executor:
 
         return {"success": False, "message": f"Unknown step type: {step_type}"}
 
-    def _open_app(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        import string
-        import shutil
+    def _open_app(self, params):
+        import string, shutil
         app = params.get("app") or params.get("query", "")
         if not app:
             return {"success": False, "message": "No application specified."}
-            
+
         app_clean = app.translate(str.maketrans("", "", string.punctuation)).strip().lower()
-        
-        # Chrome Profile Integration
+
+        # 1. Web-native apps + voice intents -> open URL directly
+        WEB_URL_MAP = {
+            "whatsapp":          "https://web.whatsapp.com",
+            "youtube":           "https://www.youtube.com",
+            "gmail":             "https://mail.google.com",
+            "google mail":       "https://mail.google.com",
+            "google maps":       "https://maps.google.com",
+            "maps":              "https://maps.google.com",
+            "google drive":      "https://drive.google.com",
+            "drive":             "https://drive.google.com",
+            "google docs":       "https://docs.google.com",
+            "meet":              "https://meet.google.com",
+            "google meet":       "https://meet.google.com",
+            "twitter":           "https://twitter.com",
+            "instagram":         "https://www.instagram.com",
+            "facebook":          "https://www.facebook.com",
+            "linkedin":          "https://www.linkedin.com",
+            "reddit":            "https://www.reddit.com",
+            "github":            "https://github.com",
+            "netflix":           "https://www.netflix.com",
+            "spotify":           "https://open.spotify.com",
+            "amazon":            "https://www.amazon.in",
+            "flipkart":          "https://www.flipkart.com",
+            "chatgpt":           "https://chat.openai.com",
+            "openai":            "https://chat.openai.com",
+            "gemini":            "https://gemini.google.com",
+            "world monitor":     "https://www.worldmonitor.app/",
+            "worldmonitor":      "https://www.worldmonitor.app/",
+            "world news":        "https://www.worldmonitor.app/",
+            "worldwide news":    "https://www.worldmonitor.app/",
+            "whats going world": "https://www.worldmonitor.app/",
+        }
+        for key, url in WEB_URL_MAP.items():
+            if key in app_clean:
+                return self._open_url({"url": url})
+
+        # 2. Chrome profile integration
         is_chrome = any(name in app_clean for name in ["chrome", "google chrome"])
         profile_dir = None
         if is_chrome:
             profiles = self._get_chrome_profiles()
-            # Try to find a profile name in the query
             for p_name, p_dir in profiles.items():
                 if p_name in app_clean:
                     profile_dir = p_dir
                     break
 
-        # Map common names to executables
-        mapping = {
-            "code": "code",
-            "vscode": "code",
-            "vs code": "code",
+        # 3. Exe name map
+        EXE_MAP = {
+            "code": "code", "vscode": "code", "vs code": "code",
+            "visual studio code": "code",
             "google chrome": "chrome",
             "chrome": "chrome" if platform.system() == "Windows" else "google-chrome",
             "firefox": "firefox",
             "notepad": "notepad" if platform.system() == "Windows" else "xdg-open",
-            "calculator": "calc",
-            "calc": "calc",
-            "command prompt": "cmd",
+            "calculator": "calc", "calc": "calc",
+            "command prompt": "cmd", "cmd": "cmd",
             "terminal": "wt" if platform.system() == "Windows" else "x-terminal-emulator",
-            "explorer": "explorer",
-            "file explorer": "explorer",
+            "explorer": "explorer", "file explorer": "explorer",
+            "task manager": "taskmgr", "paint": "mspaint",
+            "word": "winword", "excel": "excel", "powerpoint": "powerpnt",
+            "vlc": "vlc", "zoom": "zoom",
         }
-        exe = mapping.get(app_clean, app_clean)
-        
-        # If it's chrome and we still have the full app name as 'chrome', 
-        # but a profile was found, ensure we use 'chrome'
+        exe = EXE_MAP.get(app_clean, app_clean)
         if is_chrome:
             exe = "chrome" if platform.system() == "Windows" else "google-chrome"
 
+        # 4. Try native launch
         try:
             if platform.system() == "Windows":
-                # Special handling for Chrome profiles
                 if is_chrome and profile_dir:
-                    cmd = f'start chrome --profile-directory="{profile_dir}"'
-                    subprocess.Popen(cmd, shell=True)
-                # Standard app opening
+                    subprocess.Popen(
+                        f'start chrome --profile-directory="{profile_dir}"', shell=True
+                    )
                 elif exe.endswith(".exe") or shutil.which(exe):
                     os.startfile(exe) if "." in exe else subprocess.Popen([exe], shell=True)
                 else:
-                    # Windows 'start' searches registry App Paths, useful for unmapped installed software
-                    subprocess.Popen(f"start {exe}", shell=True)
+                    result = subprocess.run(
+                        ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command",
+                         f"Start-Process '{exe}' -ErrorAction Stop"],
+                        capture_output=True, timeout=8
+                    )
+                    if result.returncode != 0:
+                        raise FileNotFoundError(f"{exe!r} not found")
             else:
-                # Linux/Mac
                 cmd_args = [exe]
                 if is_chrome and profile_dir:
-                    cmd_args.append(f'--profile-directory={profile_dir}')
+                    cmd_args.append(f"--profile-directory={profile_dir}")
                 subprocess.Popen(cmd_args, start_new_session=True)
-                
+
             log_action("open_app", {"app": app, "profile": profile_dir})
-            return {"success": True, "message": f"Opened {app}." if not profile_dir else f"Opening {app} using the {profile_dir} profile."}
-        except Exception as e:
-            return {"success": False, "message": f"Failed to open {app}. Error: {str(e)}"}
+            return {
+                "success": True,
+                "message": f"Opened {app}." if not profile_dir
+                else f"Opening {app} using the {profile_dir} profile.",
+            }
+
+        except Exception:
+            # 5. Fallback: open Google search in browser
+            search_url = f"https://www.google.com/search?q={app.replace(' ', '+')}"
+            self._open_url({"url": search_url})
+            log_action("open_app_fallback", {"app": app})
+            return {
+                "success": True,
+                "message": f"I couldn't find {app} installed locally, so I searched for it online.",
+            }
+
 
     def _get_chrome_profiles(self) -> Dict[str, str]:
         """Maps lowercase display names to internal directory names (Windows/Linux/Mac)."""

@@ -217,8 +217,40 @@ class IntentParser:
                         params=params,
                     )
 
+        # 8b. Global news intents (should be above generic open/show triggers)
+        GLOBAL_NEWS_PHRASES = [
+            "what is going on worldwide",
+            "whats going on worldwide",
+            "what's going on worldwide",
+            "what's happening worldwide",
+            "whats happening worldwide",
+            "tell me what is going on",
+            "tell me whats going on",
+            "tell me what's going on",
+            "world news",
+            "global news",
+            "worldwide news",
+            "what is happening in the world",
+            "whats happening in the world",
+            "what is going worldwide",
+            "whats going worldwide",
+            "what's going worldwide",
+            "going worldwide",
+            "what's going world",
+            "whats going world",
+            "what is going world"
+        ]
+        
+        if any(w in lower for w in GLOBAL_NEWS_PHRASES):
+            return Intent(
+                type=IntentType.COMMAND,
+                raw_text=text,
+                parsed_action="global_news_summary",
+                params={},
+            )
+
         # 9. Commands (simple keywords)
-        open_triggers = ["open ", "launch ", "start ", "switch to "]
+        open_triggers = ["open ", "launch ", "start ", "switch to ", "show me ", "take me to ", "go to ", "navigate to "]
         if any(w in lower for w in open_triggers):
             query = self._extract_target(text, open_triggers)
             return Intent(
@@ -227,6 +259,26 @@ class IntentParser:
                 parsed_action="open_app",
                 params={"query": query},
             )
+
+        # 9b. Natural-language URL intents
+        URL_PHRASES = {
+            "whatsapp":                       "whatsapp",
+            "youtube":                        "youtube",
+            "check my email":                 "gmail",
+            "open my email":                  "gmail",
+            "check gmail":                    "gmail",
+            "play music":                     "spotify",
+            "show me directions":             "google maps",
+        }
+        for phrase, app_name in URL_PHRASES.items():
+            if phrase in lower:
+                return Intent(
+                    type=IntentType.COMMAND,
+                    raw_text=text,
+                    parsed_action="open_app",
+                    params={"query": app_name},
+                )
+
             
         create_triggers = ["create file ", "make file ", "new file "]
         if any(w in lower for w in create_triggers):

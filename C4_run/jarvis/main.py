@@ -120,6 +120,10 @@ def run() -> None:
     hui_window = HUIDashboard()
     hui_window.show()
 
+    from jarvis.hui.hands_overlay import HandsOverlay
+    hands_overlay = HandsOverlay(signals=hui_window.signals)
+    hands_overlay.show()
+
     # Skills and skill manager
     reminder_skill = ReminderSkill(voice_output=None, hui_window=hui_window)  # voice set after init
     skills = [
