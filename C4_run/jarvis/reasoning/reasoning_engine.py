@@ -102,6 +102,11 @@ class ReasoningEngine:
         self._coding_jobs = InMemoryJobStore()
         self._last_generated_code: Optional[str] = None
 
+        # Structured Memory System (set by main.py after init)
+        self.memory_retriever = None   # MemoryRetriever
+        self.memory_writer = None      # MemoryWriter
+        self.memory_prompt_builder = None  # MemoryPromptBuilder
+
 
     def _get_dynamic_system_prompt(self) -> str:
         from jarvis.core.world_state import world
@@ -112,26 +117,31 @@ class ReasoningEngine:
             prompt = pm.get_personality_prompt(world_snapshot=world_snap)
         else:
             prompt = C4_SYSTEM_PROMPT
+
+        # ── Structured Memory Injection ────────────────────────────────────
+        # Uses the new retriever + prompt builder pipeline instead of raw episodes/semantic_db
+        if getattr(self, "memory_retriever", None) and getattr(self, "memory_prompt_builder", None) and hasattr(self, "_last_query"):
+            try:
+                retrieved = self.memory_retriever.retrieve(self._last_query, max_results=5)
+                if retrieved:
+                    prompt = self.memory_prompt_builder.inject_into_system_prompt(prompt, retrieved)
+            except Exception as e:
+                logger.debug(f"[ReasoningEngine] Memory retrieval failed: {e}")
+
+        # ── Legacy fallbacks (kept for subsystems that still use them) ─────
         if getattr(self, "context_engine", None) and self.context_engine.is_running:
             prompt += f"\n\n--- CURRENT AMBIENT CONTEXT ---\n{self.context_engine.get_context_snapshot()}"
-        
+
         if getattr(self, "memory", None):
-            episodes = self.memory.get_recent_episodes(5)
+            episodes = self.memory.get_recent_episodes(3)
             if episodes:
-                prompt += "\n\n--- RECENT MEMORY EPISODES ---\n" + "\n".join(episodes)
-                
-        if getattr(self, "semantic_db", None) and hasattr(self, "_last_query"):
-            matches = self.semantic_db.search(self._last_query, top_k=4)
-            if matches:
-                 prompt += "\n\n--- RELEVANT RETRIEVED KNOWLEDGE ---\n(Use these facts if they pertain to the user's request)\n"
-                 for m in matches:
-                     prompt += f"- {m[1]['text']}\n"
-                     
+                prompt += "\n\n--- RECENT EPISODES ---\n" + "\n".join(episodes[-3:])
+
         if getattr(self, "temporal_habits", None):
             habits = self.temporal_habits.get_likely_habits()
             if habits:
                  prompt += f"\n\n--- PREDICTED USER HABITS ---\nLikely current actions: {', '.join(habits)}\n"
-                
+
         # Inject WorldState summary for grounded reasoning
         from jarvis.core.world_state import world
         world_summary = world.get_context_summary()
@@ -224,6 +234,16 @@ class ReasoningEngine:
             return "Could you give me a bit more detail on what you'd like me to do?"
 
         return None
+
+    def _try_memory_write(self, user_input: str, response_text: str) -> None:
+        """Post-response hook: evaluate and store worthy memories."""
+        writer = getattr(self, "memory_writer", None)
+        if not writer:
+            return
+        try:
+            writer.maybe_store(user_input=user_input, assistant_response=response_text)
+        except Exception as e:
+            logger.debug(f"[ReasoningEngine] Memory write failed: {e}")
 
     def handle_intent(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
         """Process intent and return response to speak."""
@@ -419,6 +439,12 @@ class ReasoningEngine:
             except Exception:
                 pass
         return ReasoningResponse(spoken_response="I'm afraid I didn't quite catch that, sir. Could you rephrase?")
+
+    def _dispatch_and_remember(self, intent: Intent, context: ConversationContext, response: ReasoningResponse) -> ReasoningResponse:
+        """Wrapper that triggers memory write after a successful response."""
+        if response.spoken_response and not response.stop:
+            self._try_memory_write(intent.raw_text, response.spoken_response)
+        return response
 
     def _handle_learn_fact(self, intent: Intent) -> ReasoningResponse:
         params = intent.params or {}

@@ -14,3 +14,5 @@ Pillow>=10.2.0
 keyboard>=0.13.5
 insightface>=0.7.3
 onnxruntime>=1.16.0
+numpy>=1.24.0
+faiss-cpu>=1.7.4

@@ -48,6 +48,10 @@ from .execution.scheduler import ActionScheduler
 from .execution.dag_runner import DAGRunner
 from .nlp.personality import PersonalityManager
 from .memory.semantic_db import SemanticDB
+from .memory.vector_store import VectorMemoryStore
+from .memory.retriever import MemoryRetriever
+from .memory.prompt_builder import MemoryPromptBuilder
+from .memory.writer import MemoryWriter
 from .learning.feedback_loop import ReinforcementFeedbackLoop
 from .vision.semantic_vision import SemanticVisionEngine
 from .nlp.intent_fusion import UnifiedIntentEngine
@@ -301,7 +305,10 @@ def run() -> None:
                             hui_window.signals.thinking_stopped.emit()
                         except Exception:
                             pass
-                    memory_manager.add_episode(f"User asked: '{transcript}' | JARVIS replied: '{response.spoken_response}'")
+                    memory_manager.add_episode(f"User asked: '{transcript}' | C4 replied: '{response.spoken_response}'")
+
+                # Post-response structured memory write
+                reasoning_engine._try_memory_write(transcript, response.spoken_response or "")
 
                 if response.stop:
                     break
@@ -389,6 +396,24 @@ def run() -> None:
     memory_manager.set_semantic_db(semantic_db)
     reasoning_engine.semantic_db = semantic_db
     auto_corrector = ReinforcementFeedbackLoop(semantic_db)
+
+    # ── Structured Memory System ──────────────────────────────────────────
+    vector_store = VectorMemoryStore(
+        storage_dir=memory_root,
+        embed_fn=llm_client.embed,
+    )
+    vector_store.seed_system_memories()  # No-op if already seeded
+    memory_retriever = MemoryRetriever(vector_store, max_results=5)
+    memory_prompt_builder = MemoryPromptBuilder(max_entries=10, max_chars=2000)
+    memory_writer = MemoryWriter(vector_store)
+
+    reasoning_engine.memory_retriever = memory_retriever
+    reasoning_engine.memory_writer = memory_writer
+    reasoning_engine.memory_prompt_builder = memory_prompt_builder
+    logger.info(
+        f"[StructuredMemory] Initialized. Vector store: {vector_store.count()} entries. "
+        f"FAISS index at: {vector_store._index_path}"
+    )
     
     # Phase 3: Perception Fusion Setup
     semantic_vision = SemanticVisionEngine()
