@@ -56,6 +56,46 @@ CRITICAL RULES:
         except Exception:
             return {}
 
+    def plan_with_qwen(self, intent: Intent, context: Optional[Any] = None) -> dict:
+        prompt = f"""Analyze the user's request and create an execution plan: "{intent.raw_text}"
+Return ONLY raw JSON with this specific schema:
+{{
+  "intent": "<main action intent>",
+  "task_type": "<general or coding>",
+  "steps": [
+    {{
+       "action": "<action type>",
+       "params": {{"<key>": "<value>"}}
+    }}
+  ]
+}}
+CRITICAL RULES:
+- `task_type` MUST be "coding" if it involves writing code, scripts, html, css, or software development. Otherwise "general".
+- `action` must be a valid execution step like: open_app, create_file, delete_file, read_file, tell_time, tell_user, web_search, manage_window, navigate, run_command.
+- Return ONLY the raw JSON string starting with {{ and ending with }}. No markdown blocks.
+"""
+        import json
+        if not self.llm: return {"intent": "unknown", "task_type": "general", "steps": []}
+        
+        # Use Qwen (planner role) to generate this plan
+        history = context.to_prompt_history() if hasattr(context, "to_prompt_history") else None
+        
+        # We assume self.llm provides call_llm (RoleBasedLLM)
+        if hasattr(self.llm, "call_llm"):
+            response = self.llm.call_llm(role="planner", prompt=prompt, history=history)
+        else:
+            response = self.llm.generate(prompt, history=history)
+            
+        try:
+            cleaned = response.strip()
+            if cleaned.startswith("```json"): cleaned = cleaned[7:]
+            if cleaned.startswith("```"): cleaned = cleaned[3:]
+            cleaned = cleaned.strip("` \n")
+            return json.loads(cleaned)
+        except Exception:
+            return {"intent": "unknown", "task_type": "general", "steps": []}
+
+
     def plan(self, intent: Intent, context: Optional[Any] = None) -> Plan:
         """Produce an execution plan for the given intent."""
         if intent.type == IntentType.RUN_LEARNED_COMMAND:

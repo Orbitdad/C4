@@ -24,7 +24,7 @@ from collections import deque
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget,
     QTextEdit, QHBoxLayout, QGridLayout, QFrame, QProgressBar,
-    QSizePolicy, QSizeGrip
+    QSizePolicy, QSizeGrip, QLineEdit
 )
 from PyQt5.QtCore import (
     QTimer, Qt, pyqtSignal, QObject, QRectF, QPointF,
@@ -53,6 +53,7 @@ class HUISignals(QObject):
     transcript_jarvis = pyqtSignal(str)      # what jarvis said
     boot_step = pyqtSignal(int)              # boot sequence step 0-7
     update_gesture_debug = pyqtSignal(dict)  # real-time continuous gesture info
+    command_submitted = pyqtSignal(str)      # Custom UI text command
 
 
 # ── JARVIS Waveform Widget ─────────────────────────────────────────────────────
@@ -175,6 +176,54 @@ class TranscriptPanel(QFrame):
             f"<span style='color:#00d2ff; font-weight:bold'>C4:</span> "
             f"<span style='color:#aaeeff'>{text}</span>"
         )
+        self._text.verticalScrollBar().setValue(self._text.verticalScrollBar().maximum())
+
+
+# ── Thinking Panel ─────────────────────────────────────────────────────────────
+
+class ThinkingPanel(QFrame):
+    """
+    Displays the AI's internal reasoning, intent parsing, and execution plan.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+
+        header = QLabel("◤ THINKING PROCESS ◥")
+        header.setFont(QFont("Consolas", 9, QFont.Bold))
+        header.setStyleSheet("color: #ff00cc; letter-spacing: 2px;")
+        layout.addWidget(header)
+
+        self._text = QTextEdit()
+        self._text.setReadOnly(True)
+        self._text.setMaximumHeight(200)
+        self._text.setStyleSheet("""
+            QTextEdit {
+                background: transparent;
+                border: none;
+                color: #ffaaee;
+                font-family: 'Consolas';
+                font-size: 11px;
+            }
+        """)
+        layout.addWidget(self._text)
+
+    def set_thinking(self, task_type: str, intent: str, steps: list):
+        self._text.clear()
+        self._text.append(f"<span style='color:#ffffff; font-weight:bold'>TASK TYPE:</span> {task_type}")
+        self._text.append(f"<span style='color:#ffffff; font-weight:bold'>INTENT:</span> {intent}")
+        self._text.append("<span style='color:#ffffff; font-weight:bold'>PLAN:</span>")
+        for i, step in enumerate(steps):
+            action = step.get("action", "")
+            self._text.append(f"  [{i+1}] {action}")
+        self._text.verticalScrollBar().setValue(self._text.verticalScrollBar().maximum())
+
+    def update_step_status(self, step_idx: int, status: str):
+        self._text.append(f"<span style='color:#00ffcc'>➜ Step {step_idx+1}: {status}</span>")
         self._text.verticalScrollBar().setValue(self._text.verticalScrollBar().maximum())
 
 
@@ -312,64 +361,55 @@ class CircularGauge(QWidget):
         painter.drawText(QRectF(-60, 10, 120, 20), Qt.AlignCenter, self.label)
 
 
-# ── Radar HUD ─────────────────────────────────────────────────────────────────
+# ── Active Tasks HUD ────────────────────────────────────────────────────────────
 
-class RadarHUD(QWidget):
+class ActiveTasksHUD(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.angle = 0
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._update_angle)
-        self.timer.start(40)
-        self.points = []
         self.setMinimumSize(200, 200)
+        self.tasks = []
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update)
+        self.timer.start(50)
+        self.angle = 0
 
-    def _update_angle(self):
-        self.angle = (self.angle + 4) % 360
+    def refresh_tasks(self, tasks: list):
+        self.tasks = tasks
         self.update()
-
-    def refresh_network(self):
-        self.points.clear()
-        try:
-            conns = psutil.net_connections(kind='inet')
-            for conn in conns:
-                if conn.status == 'ESTABLISHED' and conn.raddr:
-                    ip_hash = hash(conn.raddr.ip)
-                    dist = (abs(ip_hash) % 80)
-                    deg = (abs(ip_hash) % 360)
-                    rad = math.radians(deg)
-                    px = int(math.cos(rad) * dist)
-                    py = int(math.sin(rad) * dist)
-                    self.points.append((px, py))
-        except Exception:
-            pass
-        if not self.points:
-            self.points = [(random.randint(-70, 70), random.randint(-70, 70)) for _ in range(4)]
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        width = self.width()
-        height = self.height()
-        side = min(width, height)
-        painter.translate(width / 2, height / 2)
-        painter.scale(side / 200.0, side / 200.0)
-        painter.setBrush(QBrush(QColor(0, 20, 40, 100)))
-        painter.setPen(QPen(QColor(0, 210, 255, 50), 1))
-        painter.drawEllipse(-95, -95, 190, 190)
-        for r in [30, 60, 90]:
-            painter.drawEllipse(-r, -r, r * 2, r * 2)
-        painter.drawLine(-95, 0, 95, 0)
-        painter.drawLine(0, -95, 0, 95)
-        gradient = QRadialGradient(0, 0, 95, 0, 0)
-        gradient.setColorAt(0, QColor(0, 210, 255, 160))
-        gradient.setColorAt(1, QColor(0, 210, 255, 0))
-        painter.setBrush(QBrush(gradient))
-        painter.setPen(Qt.NoPen)
-        painter.drawPie(-95, -95, 190, 190, (90 - self.angle) * 16, 40 * 16)
-        painter.setBrush(QBrush(QColor(0, 255, 255)))
-        for px, py in self.points:
-            painter.drawEllipse(px, py, 4, 4)
+        
+        # Border and background
+        painter.setBrush(QBrush(QColor(0, 20, 40, 150)))
+        painter.setPen(QPen(QColor(0, 210, 255, 80), 1))
+        painter.drawRect(0, 0, self.width()-1, self.height()-1)
+        
+        # Draw tasks
+        painter.setFont(QFont("Consolas", 10))
+        y = 20
+        painter.setPen(QColor(0, 210, 255))
+        painter.drawText(10, y, "◈ ACTIVE EXECUTIONS")
+        y += 20
+        
+        if not self.tasks:
+            painter.setPen(QColor(100, 100, 100))
+            painter.drawText(20, y, "Idle. Awaiting tasks...")
+        else:
+            self.angle += 5
+            for task in self.tasks:
+                painter.setPen(QColor(0, 255, 150))
+                # Draw a spinning indicator
+                painter.save()
+                painter.translate(15, y - 4)
+                painter.rotate(self.angle)
+                painter.drawLine(-3, 0, 3, 0)
+                painter.drawLine(0, -3, 0, 3)
+                painter.restore()
+                
+                painter.drawText(30, y, str(task)[:30])
+                y += 20
 
 
 # ── Network Bar Chart ──────────────────────────────────────────────────────────
@@ -413,53 +453,42 @@ class BarChartHUD(QWidget):
             painter.drawRect(int(i * bar_w + 1), int(h / 2), int(bar_w - 2), int(bar_h_rx))
 
 
-# ── Wireframe Globe ────────────────────────────────────────────────────────────
+# ── Memory HUD ────────────────────────────────────────────────────────────
 
-class WireframeGlobeHUD(QWidget):
+class MemoryHUD(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(200, 200)
-        self.rotation = 0
-        self.nodes = []
-        rings = 10
-        segments = 20
-        for i in range(rings + 1):
-            theta = i * math.pi / rings
-            for j in range(segments):
-                phi = j * 2 * math.pi / segments
-                x = math.sin(theta) * math.cos(phi)
-                y = math.sin(theta) * math.sin(phi)
-                z = math.cos(theta)
-                self.nodes.append((x, y, z))
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._rotate)
-        self.timer.start(40)
+        self.memories = []
 
-    def _rotate(self):
-        self.rotation += 0.04
+    def refresh_memory(self, memories: list):
+        self.memories = memories
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        w = self.width()
-        h = self.height()
-        s = min(w, h) / 2.2
-        painter.translate(w / 2, h / 2)
-        painter.setBrush(QBrush(QColor(0, 30, 60, 50)))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(int(-s), int(-s), int(s * 2), int(s * 2))
-        painter.setPen(QPen(QColor(0, 255, 255, 60), 1))
-        c = math.cos(self.rotation)
-        si = math.sin(self.rotation)
-        for x, y, z in self.nodes:
-            rot_x = x * c + z * si
-            rot_z = -x * si + z * c
-            painter.setBrush(QBrush(QColor(0, 255, 255, 20 if rot_z < 0 else 150)))
-            painter.setPen(Qt.NoPen)
-            px = int(rot_x * s)
-            py = int(y * s * 0.9)
-            painter.drawEllipse(px - 2, py - 2, 4, 4)
+        
+        # Border
+        painter.setBrush(QBrush(QColor(0, 30, 60, 150)))
+        painter.setPen(QPen(QColor(0, 255, 255, 80), 1))
+        painter.drawRect(0, 0, self.width()-1, self.height()-1)
+        
+        painter.setFont(QFont("Consolas", 10))
+        y = 20
+        painter.setPen(QColor(0, 255, 255))
+        painter.drawText(10, y, "◈ CORTEX MEMORY HITS")
+        y += 20
+        
+        if not self.memories:
+            painter.setPen(QColor(100, 100, 100))
+            painter.drawText(20, y, "No recent context.")
+        else:
+            for mem in self.memories:
+                painter.setPen(QColor(255, 200, 0))
+                # Text wrap logic placeholder
+                painter.drawText(10, y, str(mem)[:35] + "...")
+                y += 20
 
 
 # ── Process Monitor ────────────────────────────────────────────────────────────
@@ -883,15 +912,15 @@ class HUIDashboard(QMainWindow):
         lbl_g = QLabel("◈  GLOBAL ASSETS")
         lbl_g.setObjectName("PanelHeader")
         globe_vbox.addWidget(lbl_g)
-        self.globe = WireframeGlobeHUD()
+        self.globe = MemoryHUD()
         self.globe.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         globe_vbox.addWidget(self.globe, 1)
         globe_layout.addLayout(globe_vbox)
         radar_vbox = QVBoxLayout()
-        lbl_r = QLabel("◈  SOCKET RADAR")
+        lbl_r = QLabel("◈  ACTIVE TASKS")
         lbl_r.setObjectName("PanelHeader")
         radar_vbox.addWidget(lbl_r)
-        self.radar = RadarHUD()
+        self.radar = ActiveTasksHUD()
         self.radar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         radar_vbox.addWidget(self.radar, 1)
         globe_layout.addLayout(radar_vbox)
@@ -978,6 +1007,18 @@ class HUIDashboard(QMainWindow):
         self.transcript_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.transcript_panel._text.setMaximumHeight(9999)
         transcript_col.addWidget(self.transcript_panel, 1)
+
+        # Thinking Panel
+        self.thinking_panel = ThinkingPanel()
+        transcript_col.addWidget(self.thinking_panel, 1)
+
+        # Command Input Field
+        self.command_input = QLineEdit()
+        self.command_input.setPlaceholderText("Enter command...")
+        self.command_input.setStyleSheet("background: rgba(0, 20, 40, 200); color: #00ffcc; border: 1px solid #00ffcc; font-family: 'Consolas'; font-size: 12px; padding: 4px;")
+        self.command_input.returnPressed.connect(self._on_command_entered)
+        transcript_col.addWidget(self.command_input)
+
         log_layout.addLayout(transcript_col, 2)
 
         # Vertical separator
@@ -1018,6 +1059,12 @@ class HUIDashboard(QMainWindow):
 
         # Kick off boot sequence
         QTimer.singleShot(200, self._start_boot_sequence)
+    def _on_command_entered(self):
+        cmd = self.command_input.text().strip()
+        if cmd:
+            self.command_input.clear()
+            self.signals.transcript_user.emit(cmd)
+            self.signals.command_submitted.emit(cmd)
 
     def _toggle_maximize(self):
         if self.isMaximized():
