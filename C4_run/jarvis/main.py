@@ -213,6 +213,86 @@ def run() -> None:
             return f"Welcome back {who}!! {recap}"
         return f"Welcome back {who}!!"
 
+    def process_input(text_input: str, is_voice: bool = True):
+        """Unified processing for voice and text commands."""
+        nonlocal last_interaction_time
+        last_interaction_time = time.time()
+        
+        # Phase 3: Fused Intent (only for voice/gesture fusion)
+        if is_voice:
+            text_input = intent_fusion.fuse_context(text_input)
+
+        logger.info(f"Processing ({'Voice' if is_voice else 'UI'}): {text_input}")
+        intent = intent_parser.parse(text_input, context)
+
+        # Notify HUI of thinking start
+        if hui_window:
+            hui_window.signals.thinking_started.emit()
+
+        response = reasoning_engine.handle_intent(intent, context)
+
+        # Update context
+        context.add_turn(
+            user_text=text_input,
+            assistant_text=response.spoken_response,
+        )
+        if response.last_action:
+            context.last_action = response.last_action
+
+        # UI Updates
+        if hui_window:
+            hui_window.signals.thinking_stopped.emit()
+            if response.spoken_response:
+                hui_window.signals.transcript_jarvis.emit(response.spoken_response)
+
+        # Speak
+        if response.spoken_response:
+            voice_output.speak(response.spoken_response)
+
+    # ── HUI Signal Connections ───────────────────────────────────────────
+    if hui_window:
+        hui_window.signals.command_submitted.connect(lambda cmd: process_input(cmd, is_voice=False))
+
+    # ── EventBus Subscriptions for HUI ──────────────────────────────────
+    def _on_thinking_update(event: SystemEvent):
+        if hui_window:
+            hui_window.thinking_panel.set_thinking(
+                event.data.get("task_type", "general"),
+                event.data.get("intent", "unknown"),
+                event.data.get("steps", [])
+            )
+            
+    def _on_thinking_step_status(event: SystemEvent):
+        if hui_window:
+            hui_window.thinking_panel.update_step_status(
+                event.data.get("step_idx", 0),
+                event.data.get("status", "")
+            )
+
+    def _on_hui_gesture(event: SystemEvent):
+        if not hui_window: return
+        action = event.data.get("action")
+        # Logic to cycle focus based on swipe
+        panels = ["vision", "globe", "metrics", "network", "system", "log"]
+        current = hui_window.focused_panel or "vision"
+        try:
+            idx = panels.index(current)
+            if action == "SWIPE_RIGHT":
+                new_idx = (idx + 1) % len(panels)
+                hui_window.set_focused_panel(panels[new_idx])
+            elif action == "SWIPE_LEFT":
+                new_idx = (idx - 1) % len(panels)
+                hui_window.set_focused_panel(panels[new_idx])
+            elif action == "PINCH":
+                hui_window.trigger_glitch()
+                hui_window._log_message(f"HUI: Selection confirmed on {current.upper()}")
+        except ValueError:
+            hui_window.focused_panel = "vision"
+
+    bus.subscribe("c4.thinking.update", _on_thinking_update)
+    bus.subscribe("c4.thinking.step_status", _on_thinking_step_status)
+    bus.subscribe("hui.gesture_action", _on_hui_gesture)
+
     def main_loop():
         wake_word = (config.get("voice", {}) or {}).get("wake_word", "jarvis").lower()
         wake_enabled = bool((config.get("voice", {}) or {}).get("wake_word_enabled", True))
@@ -269,10 +349,6 @@ def run() -> None:
                             pass
                         continue
                     
-                # Phase 3: Fused Intent
-                # Allows saying "open this" while pointing
-                transcript = intent_fusion.fuse_context(transcript)
-
                 # Check for immediate interrupt
                 if any(w in transcript.lower() for w in ["stop", "quiet", "be quiet", "shut up", "don't teach me"]):
                     voice_output.stop()
@@ -284,42 +360,12 @@ def run() -> None:
                         except Exception: pass
                         continue # Skip further processing for simple stop commands
 
-                logger.info("Heard: %s", transcript)
-                intent = intent_parser.parse(transcript, context)
+                # Process the command via unified pipeline
+                process_input(transcript, is_voice=True)
 
-                response = reasoning_engine.handle_intent(intent, context)
-
-                context.add_turn(
-                    user_text=transcript,
-                    assistant_text=response.spoken_response,
-                )
-                if response.last_action:
-                    context.last_action = response.last_action
-
-                if response.spoken_response:
-                    voice_output.speak(response.spoken_response)
-                    # Emit JARVIS transcript to HUI
-                    if hui_window:
-                        try:
-                            hui_window.signals.transcript_jarvis.emit(response.spoken_response)
-                            hui_window.signals.thinking_stopped.emit()
-                        except Exception:
-                            pass
-                    memory_manager.add_episode(f"User asked: '{transcript}' | C4 replied: '{response.spoken_response}'")
-
-                # Post-response structured memory write
-                reasoning_engine._try_memory_write(transcript, response.spoken_response or "")
-
-                if response.stop:
-                    break
             except Exception as e:
-                import speech_recognition as sr
-                if isinstance(e, sr.RequestError):
-                    logger.error(f"Speech recognition API error: {e}")
-                    voice_output.speak("I am having trouble connecting to the speech service.")
-                else:
-                    logger.exception(f"Unhandled exception in main loop cycle: {e}")
-                time.sleep(2) # Prevent rapid error loops
+                logger.error(f"[MainLoop] Error: {e}")
+                time.sleep(0.5)
 
     # Phase 1: Event-Driven Autonomy Setup
     bus.start()

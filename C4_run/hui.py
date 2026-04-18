@@ -1066,6 +1066,25 @@ class HUIDashboard(QMainWindow):
             self.signals.transcript_user.emit(cmd)
             self.signals.command_submitted.emit(cmd)
 
+    def set_focused_panel(self, name: str):
+        """Update visual focus state of panels."""
+        if name not in self.panels:
+            return
+            
+        self.focused_panel = name
+        for p_name, panel in self.panels.items():
+            if p_name == name:
+                panel.setObjectName("PanelActive")
+                panel.setStyleSheet("") # Clear any inline style to use QSS ID
+            else:
+                panel.setObjectName("Panel")
+                panel.setStyleSheet("") # Clear any inline style
+        
+        # Force style re-polish
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._log_message(f"HUI: Focus shifted to {name.upper()}")
+
     def _toggle_maximize(self):
         if self.isMaximized():
             self.showNormal()
@@ -1270,12 +1289,12 @@ class HUIDashboard(QMainWindow):
                     break
 
         if new_focus != self.focused_panel:
-            for name, panel in self.panels.items():
-                if name == new_focus:
-                    panel.setStyleSheet("border: 2px solid rgba(0, 255, 255, 200); background-color: rgba(0, 80, 130, 40);")
-                else:
-                    panel.setStyleSheet("")
-            self.focused_panel = new_focus
+            if new_focus:
+                self.set_focused_panel(new_focus)
+            else:
+                self.focused_panel = None
+                for panel in self.panels.values():
+                    panel.setObjectName("Panel")
             self.dwell_count = 0
 
         if new_focus and new_focus == self.focused_panel:

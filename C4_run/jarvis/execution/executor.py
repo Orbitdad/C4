@@ -81,6 +81,8 @@ class Executor:
             return self._manage_window(params)
         if step_type == "run_python":
             return self._run_python(params)
+        if step_type == "navigate":
+            return self._open_url(params)
             
         # Hardware / UI Control
         if step_type == "mouse_move":

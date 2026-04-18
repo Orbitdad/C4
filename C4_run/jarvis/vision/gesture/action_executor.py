@@ -262,6 +262,15 @@ class ActionExecutor:
             self.execute(event.data)
         elif action_name in allowed_actions:
             self.execute({"type": action_name})
+            
+        # Bridge to HUI for focus/action
+        if _BUS_AVAILABLE:
+            if action_name == "PREVIOUS":
+                bus.publish(SystemEvent(name="hui.gesture_action", data={"action": "SWIPE_LEFT"}))
+            elif action_name == "NEXT":
+                bus.publish(SystemEvent(name="hui.gesture_action", data={"action": "SWIPE_RIGHT"}))
+            elif action_name in ["CLICK", "TRIGGER"]:
+                bus.publish(SystemEvent(name="hui.gesture_action", data={"action": "PINCH"}))
 
     def _on_gesture_detected(self, event: "SystemEvent") -> None:
         """High-frequency listener for raw detection/movement."""
