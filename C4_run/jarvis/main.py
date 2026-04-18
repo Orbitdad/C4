@@ -201,6 +201,8 @@ def run() -> None:
     reminder_skill.set_hui(hui_window)
 
     context = ConversationContext()
+    last_interaction_time = time.time()
+    session_timeout = 300 # Seconds of activity gap before returning to wake-word mode
 
     def _compose_return_greeting(name: str = "") -> str:
         # Required catchphrase + a short recent work recap from episodic memory.
@@ -297,8 +299,7 @@ def run() -> None:
         wake_word = (config.get("voice", {}) or {}).get("wake_word", "jarvis").lower()
         wake_enabled = bool((config.get("voice", {}) or {}).get("wake_word_enabled", True))
         armed = not wake_enabled
-        last_interaction_time = time.time()
-        session_timeout = 300 # Seconds of activity gap before returning to wake-word mode
+        armed = not wake_enabled
         if wake_enabled:
             try:
                 hui_window.signals.update_status.emit(f"Say '{wake_word.upper()}' to activate")

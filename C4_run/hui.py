@@ -1305,8 +1305,7 @@ class HUIDashboard(QMainWindow):
                 if new_focus == "log":
                     self.log_text.clear()
                 elif new_focus == "globe":
-                    self.radar.refresh_network()
-                    self._log_message("NETWORK: Socket radar refreshed.")
+                    self._log_message("MEMORY: Cortex context refreshed.")
                 elif new_focus == "system":
                     self.process_monitor.update_processes()
         else:
@@ -1407,8 +1406,6 @@ class HUIDashboard(QMainWindow):
         except ImportError:
             pass
 
-        if random.random() < 0.15:
-            self.radar.refresh_network()
 
 
 def start_hui():
