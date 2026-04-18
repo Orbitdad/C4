@@ -41,19 +41,23 @@ from PyQt5.QtGui import (
 class HUISignals(QObject):
     update_status = pyqtSignal(str)
     log_message = pyqtSignal(str)
-    update_vision = pyqtSignal(object)       # opencv frame
-    update_landmarks = pyqtSignal(list)      # hand landmarks
-    speaking_started = pyqtSignal(str)       # text being spoken
+    update_vision = pyqtSignal(object)           # opencv frame
+    update_landmarks = pyqtSignal(list)          # hand landmarks
+    speaking_started = pyqtSignal(str)           # text being spoken
     speaking_stopped = pyqtSignal()
     thinking_started = pyqtSignal()
     thinking_stopped = pyqtSignal()
-    face_detected = pyqtSignal(str, float)   # name, confidence
-    alert_critical = pyqtSignal(str)         # critical message
-    transcript_user = pyqtSignal(str)        # what user said
-    transcript_jarvis = pyqtSignal(str)      # what jarvis said
-    boot_step = pyqtSignal(int)              # boot sequence step 0-7
-    update_gesture_debug = pyqtSignal(dict)  # real-time continuous gesture info
-    command_submitted = pyqtSignal(str)      # Custom UI text command
+    face_detected = pyqtSignal(str, float)       # name, confidence
+    alert_critical = pyqtSignal(str)             # critical message
+    transcript_user = pyqtSignal(str)            # what user said
+    transcript_jarvis = pyqtSignal(str)          # what jarvis said
+    boot_step = pyqtSignal(int)                  # boot sequence step 0-7
+    update_gesture_debug = pyqtSignal(dict)      # real-time continuous gesture info
+    command_submitted = pyqtSignal(str)          # Custom UI text command
+    # ── Command-pipeline signals ────────────────────────────────────────────
+    execution_status = pyqtSignal(str)           # "Planning...", "Executing...", "Completed"
+    thinking_plan = pyqtSignal(str, str, list)   # task_type, intent, steps
+    thinking_step_status = pyqtSignal(int, str)  # step_idx, status ("running"/"done"/"error")
 
 
 # ── JARVIS Waveform Widget ─────────────────────────────────────────────────────
@@ -183,24 +187,65 @@ class TranscriptPanel(QFrame):
 
 class ThinkingPanel(QFrame):
     """
-    Displays the AI's internal reasoning, intent parsing, and execution plan.
+    Displays the AI's real-time reasoning, intent, execution plan and step status.
+    Shows:
+      - Task type badge (GENERAL / CODING)
+      - Intent label
+      - Step-by-step plan with color-coded status indicators
+      - Live execution status (Planning/Executing/Completed)
     """
+
+    # Step status colors
+    _STATUS_COLORS = {
+        "pending": "#556677",
+        "running": "#ffcc00",
+        "done":    "#00ff88",
+        "error":   "#ff4455",
+    }
+    _STATUS_ICONS = {
+        "pending": "○",
+        "running": "⟳",
+        "done":    "✓",
+        "error":   "✗",
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("Panel")
+        self._steps: list = []
+        self._step_statuses: list = []
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(4)
 
-        header = QLabel("◤ THINKING PROCESS ◥")
+        # Header row
+        header_row = QHBoxLayout()
+        header = QLabel("◤ C4 THINKING ◥")
         header.setFont(QFont("Consolas", 9, QFont.Bold))
         header.setStyleSheet("color: #ff00cc; letter-spacing: 2px;")
-        layout.addWidget(header)
+        header_row.addWidget(header)
 
+        self._task_badge = QLabel("")
+        self._task_badge.setFont(QFont("Consolas", 8, QFont.Bold))
+        self._task_badge.setStyleSheet(
+            "color: #000; background: #00d2ff; border-radius: 3px; padding: 1px 5px;"
+        )
+        self._task_badge.setFixedHeight(16)
+        header_row.addStretch()
+        header_row.addWidget(self._task_badge)
+        layout.addLayout(header_row)
+
+        # Status line
+        self._status_lbl = QLabel("Awaiting command...")
+        self._status_lbl.setFont(QFont("Consolas", 9))
+        self._status_lbl.setStyleSheet("color: #88aacc; font-style: italic;")
+        layout.addWidget(self._status_lbl)
+
+        # Main content text
         self._text = QTextEdit()
         self._text.setReadOnly(True)
-        self._text.setMaximumHeight(200)
+        self._text.setMaximumHeight(180)
         self._text.setStyleSheet("""
             QTextEdit {
                 background: transparent;
@@ -212,18 +257,103 @@ class ThinkingPanel(QFrame):
         """)
         layout.addWidget(self._text)
 
-    def set_thinking(self, task_type: str, intent: str, steps: list):
+        # Animated dots timer for "Planning..." indicator
+        self._dot_count = 0
+        self._dot_timer = QTimer(self)
+        self._dot_timer.timeout.connect(self._tick_dots)
+        self._is_planning = False
+
+    def set_status(self, status: str) -> None:
+        """Update the live status line (Planning... / Executing... / Completed / Error)."""
+        if status.lower().startswith("plan"):
+            self._is_planning = True
+            self._status_lbl.setStyleSheet("color: #ffcc00; font-style: italic;")
+            if not self._dot_timer.isActive():
+                self._dot_timer.start(400)
+        else:
+            self._is_planning = False
+            self._dot_timer.stop()
+
+        if "complet" in status.lower():
+            self._status_lbl.setStyleSheet("color: #00ff88; font-weight: bold;")
+            self._status_lbl.setText(f"✓  {status.upper()}")
+        elif "error" in status.lower() or "fail" in status.lower():
+            self._status_lbl.setStyleSheet("color: #ff4455; font-weight: bold;")
+            self._status_lbl.setText(f"✗  {status.upper()}")
+        elif "execut" in status.lower():
+            self._status_lbl.setStyleSheet("color: #00d2ff; font-weight: bold;")
+            self._status_lbl.setText(f"⚡ {status}")
+        elif not self._is_planning:
+            self._status_lbl.setStyleSheet("color: #88aacc; font-style: italic;")
+            self._status_lbl.setText(status)
+
+    def _tick_dots(self) -> None:
+        self._dot_count = (self._dot_count + 1) % 4
+        dots = "." * self._dot_count
+        self._status_lbl.setText(f"⟳ PLANNING{dots}")
+
+    def set_thinking(self, task_type: str, intent: str, steps: list) -> None:
+        """Populate plan from EventBus c4.thinking.update events (legacy path)."""
+        self._populate(task_type, intent, steps)
+
+    def set_thinking_plan(self, task_type: str, intent: str, steps: list) -> None:
+        """Populate plan from new thinking_plan signal (CommandHandler path)."""
+        self._populate(task_type, intent, steps)
+
+    def _populate(self, task_type: str, intent: str, steps: list) -> None:
+        self._steps = steps
+        self._step_statuses = ["pending"] * len(steps)
+
+        # Badge
+        tt = (task_type or "general").upper()
+        badge_color = "#ff4455" if tt == "CODING" else "#00d2ff"
+        self._task_badge.setText(tt)
+        self._task_badge.setStyleSheet(
+            f"color: #000; background: {badge_color}; border-radius: 3px; padding: 1px 5px;"
+        )
+
+        self._redraw(intent)
+
+    def _redraw(self, intent: str = "") -> None:
         self._text.clear()
-        self._text.append(f"<span style='color:#ffffff; font-weight:bold'>TASK TYPE:</span> {task_type}")
-        self._text.append(f"<span style='color:#ffffff; font-weight:bold'>INTENT:</span> {intent}")
-        self._text.append("<span style='color:#ffffff; font-weight:bold'>PLAN:</span>")
-        for i, step in enumerate(steps):
-            action = step.get("action", "")
-            self._text.append(f"  [{i+1}] {action}")
+        if intent:
+            self._text.append(
+                f"<span style='color:#aaaaaa'>INTENT:</span> "
+                f"<span style='color:#ffffff; font-weight:bold'>{intent}</span>"
+            )
+        if self._steps:
+            self._text.append("<span style='color:#aaaaaa'>PLAN:</span>")
+            for i, step in enumerate(self._steps):
+                action = step.get("action", "") if isinstance(step, dict) else str(step)
+                status = self._step_statuses[i] if i < len(self._step_statuses) else "pending"
+                color  = self._STATUS_COLORS.get(status, "#556677")
+                icon   = self._STATUS_ICONS.get(status, "○")
+                params_str = ""
+                if isinstance(step, dict):
+                    p = step.get("params", {})
+                    if p:
+                        params_str = " " + " ".join(f"{k}={v}" for k, v in list(p.items())[:2])
+                self._text.append(
+                    f"  <span style='color:{color}'>{icon}</span> "
+                    f"<span style='color:#ccddee'>[{i+1}] {action}{params_str[:40]}</span>"
+                )
         self._text.verticalScrollBar().setValue(self._text.verticalScrollBar().maximum())
 
-    def update_step_status(self, step_idx: int, status: str):
-        self._text.append(f"<span style='color:#00ffcc'>➜ Step {step_idx+1}: {status}</span>")
+    def update_step_status(self, step_idx: int, status: str) -> None:
+        """Update a single step's status and redraw."""
+        if 0 <= step_idx < len(self._step_statuses):
+            self._step_statuses[step_idx] = status
+        # Re-render to reflect updated status
+        self._text.clear()
+        for i, step in enumerate(self._steps):
+            action = step.get("action", "") if isinstance(step, dict) else str(step)
+            st     = self._step_statuses[i] if i < len(self._step_statuses) else "pending"
+            color  = self._STATUS_COLORS.get(st, "#556677")
+            icon   = self._STATUS_ICONS.get(st, "○")
+            self._text.append(
+                f"  <span style='color:{color}'>{icon}</span> "
+                f"<span style='color:#ccddee'>[{i+1}] {action}</span>"
+            )
         self._text.verticalScrollBar().setValue(self._text.verticalScrollBar().maximum())
 
 
@@ -660,6 +790,10 @@ class HUIDashboard(QMainWindow):
         self.signals.thinking_stopped.connect(self._on_thinking_stopped)
         self.signals.face_detected.connect(self._on_face_detected)
         self.signals.alert_critical.connect(self._on_critical_alert)
+        # ── New pipeline signals ──────────────────────────────────────────────
+        self.signals.execution_status.connect(self._on_execution_status)
+        self.signals.thinking_plan.connect(self._on_thinking_plan)
+        self.signals.thinking_step_status.connect(self._on_thinking_step_status)
         self.signals.transcript_user.connect(self._on_transcript_user)
         self.signals.transcript_jarvis.connect(self._on_transcript_jarvis)
         self.signals.boot_step.connect(self._on_boot_step)
@@ -1070,20 +1204,34 @@ class HUIDashboard(QMainWindow):
         """Update visual focus state of panels."""
         if name not in self.panels:
             return
-            
+
         self.focused_panel = name
         for p_name, panel in self.panels.items():
             if p_name == name:
                 panel.setObjectName("PanelActive")
-                panel.setStyleSheet("") # Clear any inline style to use QSS ID
+                panel.setStyleSheet("")
             else:
                 panel.setObjectName("Panel")
-                panel.setStyleSheet("") # Clear any inline style
-        
+                panel.setStyleSheet("")
+
         # Force style re-polish
         self.style().unpolish(self)
         self.style().polish(self)
         self._log_message(f"HUI: Focus shifted to {name.upper()}")
+
+    def set_command_active(self, panel_id: str, active: bool) -> None:
+        """
+        Dim all panels except the active command panel.
+        When active=False, restore all panels to full opacity.
+        """
+        from PyQt5.QtWidgets import QGraphicsOpacityEffect
+        for name, panel in self.panels.items():
+            effect = QGraphicsOpacityEffect(panel)
+            if active:
+                effect.setOpacity(1.0 if name == panel_id else 0.30)
+            else:
+                effect.setOpacity(1.0)
+            panel.setGraphicsEffect(effect)
 
     def _toggle_maximize(self):
         if self.isMaximized():
@@ -1184,10 +1332,43 @@ class HUIDashboard(QMainWindow):
         self.explain_label.setText("C4: Processing...")
         self.ai_status_label.setText("STATUS: THINKING...")
         self.ai_status_label.setStyleSheet("color: #ffcc00; font-size: 10px;")
+        self.thinking_panel.set_status("Planning...")
+        self.set_command_active("log", True)
 
     def _on_thinking_stopped(self):
         self.status_orb.set_mode("idle")
         self.ai_status_label.setStyleSheet("color: #4499aa; font-size: 10px;")
+        self.ai_status_label.setText("STATUS: ONLINE")
+        self.set_command_active("log", False)
+
+    def _on_execution_status(self, status: str) -> None:
+        """Handle live execution status updates from CommandHandler."""
+        self.thinking_panel.set_status(status)
+        if "plan" in status.lower():
+            self.ai_status_label.setText("STATUS: PLANNING")
+            self.ai_status_label.setStyleSheet("color: #ffcc00; font-size: 10px;")
+            self.status_orb.set_mode("thinking")
+        elif "execut" in status.lower():
+            self.ai_status_label.setText("STATUS: EXECUTING")
+            self.ai_status_label.setStyleSheet("color: #00d2ff; font-size: 10px;")
+            self.status_orb.set_mode("speaking")
+        elif "complet" in status.lower():
+            self.ai_status_label.setText("STATUS: ONLINE")
+            self.ai_status_label.setStyleSheet("color: #00ff88; font-size: 10px;")
+            self.status_orb.set_mode("idle")
+        elif "error" in status.lower():
+            self.ai_status_label.setText("STATUS: ERROR")
+            self.ai_status_label.setStyleSheet("color: #ff4455; font-size: 10px;")
+            self.status_orb.set_mode("error")
+
+    def _on_thinking_plan(self, task_type: str, intent: str, steps: list) -> None:
+        """Populate ThinkingPanel from CommandHandler thinking_plan signal."""
+        self.thinking_panel.set_thinking_plan(task_type, intent, steps)
+        self.explain_label.setText(f"C4: {intent}")
+
+    def _on_thinking_step_status(self, step_idx: int, status: str) -> None:
+        """Update a single step's status indicator in the ThinkingPanel."""
+        self.thinking_panel.update_step_status(step_idx, status)
 
     def _on_face_detected(self, name: str, confidence: float):
         self._face_lbl.setText(f"◉ IDENTIFIED: {name.upper()}  [{confidence:.0%}]")

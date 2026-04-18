@@ -34,6 +34,7 @@ from .skills.smart_home import SmartHomeSkill
 from .skills.model_viewer import ModelViewerSkill
 from .vision.manager import VisionManager
 from .execution.executor import Executor
+from .execution.action_handler import ActionHandler       # ─ NEW: controlled execution layer
 from .vision.gesture.action_executor import ActionExecutor
 
 # Core subsystem imports
@@ -67,11 +68,13 @@ from .execution.safety_layer import sandbox as safety_sandbox
 from .perception.system_monitor import SystemMonitor
 from .perception.screen_reader import ScreenReader
 from .core.skill_synthesizer import SkillSynthesizer
+from .command_handler import CommandHandler                # ─ NEW: central AI pipeline
 import threading
 import time
 from hui import HUIDashboard
 import sys
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QTimer
 from .voice.wake_word import contains_wake_word, strip_wake_word
 
 
@@ -216,44 +219,69 @@ def run() -> None:
         return f"Welcome back {who}!!"
 
     def process_input(text_input: str, is_voice: bool = True):
-        """Unified processing for voice and text commands."""
+        """
+        Unified processing for voice and text commands.
+        Routes short-circuit skill intents through the ReasoningEngine (fast path),
+        and all user-facing commands through the CommandHandler AI pipeline.
+        """
         nonlocal last_interaction_time
         last_interaction_time = time.time()
-        
+
         # Phase 3: Fused Intent (only for voice/gesture fusion)
         if is_voice:
             text_input = intent_fusion.fuse_context(text_input)
 
         logger.info(f"Processing ({'Voice' if is_voice else 'UI'}): {text_input}")
+
+        # Emit user transcript to HUI
+        if hui_window:
+            try:
+                hui_window.signals.transcript_user.emit(text_input)
+            except Exception:
+                pass
+
+        # Route through the centralized CommandHandler pipeline
+        # (handles memory → plan → execute → store → UI feedback)
+        command_handler.handle(text_input, source="voice" if is_voice else "ui", context=context)
+
+        # Also run through the ReasoningEngine for skills that bypass the
+        # LLM pipeline (e.g., small_talk, time, learned commands) so we
+        # still get spoken responses for those paths.
         intent = intent_parser.parse(text_input, context)
 
-        # Notify HUI of thinking start
-        if hui_window:
-            hui_window.signals.thinking_started.emit()
-
-        response = reasoning_engine.handle_intent(intent, context)
-
-        # Update context
-        context.add_turn(
-            user_text=text_input,
-            assistant_text=response.spoken_response,
-        )
-        if response.last_action:
-            context.last_action = response.last_action
-
-        # UI Updates
-        if hui_window:
-            hui_window.signals.thinking_stopped.emit()
+        # Only delegate non-general intents to reasoning engine to avoid double-execution
+        from .nlp.schemas import IntentType
+        _fast_types = {
+            IntentType.SMALL_TALK,
+            IntentType.LEARN_FACT,
+            IntentType.LEARN_COMMAND,
+            IntentType.RUN_LEARNED_COMMAND,
+            IntentType.FEEDBACK,
+            IntentType.MEMORY_QUERY,
+            IntentType.CONTROL,
+        }
+        if intent.type in _fast_types:
+            response = reasoning_engine.handle_intent(intent, context)
+            context.add_turn(
+                user_text=text_input,
+                assistant_text=response.spoken_response,
+            )
+            if response.last_action:
+                context.last_action = response.last_action
+            if hui_window and response.spoken_response:
+                try:
+                    hui_window.signals.transcript_jarvis.emit(response.spoken_response)
+                except Exception:
+                    pass
             if response.spoken_response:
-                hui_window.signals.transcript_jarvis.emit(response.spoken_response)
+                voice_output.speak(response.spoken_response)
 
-        # Speak
-        if response.spoken_response:
-            voice_output.speak(response.spoken_response)
-
-    # ── HUI Signal Connections ───────────────────────────────────────────
+    # ── HUI Signal Connections ───────────────────────────────────────
     if hui_window:
-        hui_window.signals.command_submitted.connect(lambda cmd: process_input(cmd, is_voice=False))
+        # Text command input → CommandHandler (central pipeline)
+        hui_window.signals.command_submitted.connect(
+            lambda cmd: command_handler.handle(cmd, source="ui", context=context)
+        )
 
     # ── EventBus Subscriptions for HUI ──────────────────────────────────
     def _on_thinking_update(event: SystemEvent):
@@ -274,7 +302,6 @@ def run() -> None:
     def _on_hui_gesture(event: SystemEvent):
         if not hui_window: return
         action = event.data.get("action")
-        # Logic to cycle focus based on swipe
         panels = ["vision", "globe", "metrics", "network", "system", "log"]
         current = hui_window.focused_panel or "vision"
         try:
@@ -286,14 +313,34 @@ def run() -> None:
                 new_idx = (idx - 1) % len(panels)
                 hui_window.set_focused_panel(panels[new_idx])
             elif action == "PINCH":
+                # Single pinch: visual select / glitch effect
                 hui_window.trigger_glitch()
                 hui_window._log_message(f"HUI: Selection confirmed on {current.upper()}")
+            elif action == "HOLD":
+                # Hold gesture: confirm any pending CommandHandler plan
+                hui_window._log_message("HUI: HOLD detected — confirming pending command.")
+                hui_window.set_command_active(current, True)
+                command_handler.confirm_pending()
         except ValueError:
             hui_window.focused_panel = "vision"
 
     bus.subscribe("c4.thinking.update", _on_thinking_update)
     bus.subscribe("c4.thinking.step_status", _on_thinking_step_status)
     bus.subscribe("hui.gesture_action", _on_hui_gesture)
+
+    # ── CommandHandler (Central AI Pipeline) ───────────────────────────
+    # ActionHandler wraps the Executor with a strict allowlist and coding router
+    action_handler = ActionHandler(executor=executor, llm_client=llm_client)
+
+    # CommandHandler is the single entry-point for all user commands
+    command_handler = CommandHandler(
+        planner=planner,
+        action_handler=action_handler,
+        memory_retriever=None,   # injected after VectorStore init below
+        memory_writer=None,
+        hui_window=hui_window,
+        event_bus=bus,
+    )
 
     def main_loop():
         wake_word = (config.get("voice", {}) or {}).get("wake_word", "jarvis").lower()
@@ -368,204 +415,201 @@ def run() -> None:
                 logger.error(f"[MainLoop] Error: {e}")
                 time.sleep(0.5)
 
-    # Phase 1: Event-Driven Autonomy Setup
-    bus.start()
+    # ── Deferred Subsystem Startup (THREAD-SAFETY FIX) ──────────────────────
+    # All subsystems that spawn threads or Qt-timer-backed objects MUST be
+    # started via QTimer.singleShot so they run inside the Qt event loop
+    # on the main thread.  Calling .start() before app.exec_() causes the
+    # "QObject::startTimer: Timers cannot be started from another thread"
+    # crash.
 
-    # ── Face Recognition ──────────────────────────────────────────────
-    face_pipeline = vision_manager.start_face_recognition(
-        identity_manager=identity_manager,
-        threshold=config.get("vision", {}).get("face_recognition_threshold", 0.45),
-    )
-    reasoning_engine.face_pipeline = face_pipeline
+    def _deferred_startup():
+        """Run AFTER Qt event loop is alive — safe to start all subsystems."""
+        nonlocal intent_fusion  # process_input references this
 
-    def _on_user_detected(event: SystemEvent):
-        """
-        Memory hook: when a registered user is detected, JARVIS:
-        1. Greets them once per session.
-        2. Pre-loads their personalized facts into temporal context.
-        3. Logs the session-start episode.
-        """
-        uid = event.data.get("user_id")
-        name = event.data.get("display_name", "there")
+        # Phase 1: Event-driven Autonomy
+        bus.start()
 
-        # Avoid re-greeting on every subsequent detection cycle
-        from jarvis.core.world_state import world
-        snap = world.get_snapshot()
-        if snap["temporal_context"].get(f"greeted_{uid}"):
-            return
+        # ── Face Recognition ──────────────────────────────────────────
+        face_pipeline = vision_manager.start_face_recognition(
+            identity_manager=identity_manager,
+            threshold=config.get("vision", {}).get("face_recognition_threshold", 0.45),
+        )
+        reasoning_engine.face_pipeline = face_pipeline
 
-        world.set_temporal_context(f"greeted_{uid}", True, ttl_seconds=3600)
+        def _on_user_detected(event: SystemEvent):
+            uid  = event.data.get("user_id")
+            name = event.data.get("display_name", "there")
+            from jarvis.core.world_state import world
+            snap = world.get_snapshot()
+            if snap["temporal_context"].get(f"greeted_{uid}"):
+                return
+            world.set_temporal_context(f"greeted_{uid}", True, ttl_seconds=3600)
+            user_facts = memory_manager.find_facts(query=name, category="user")
+            if user_facts:
+                for fact in user_facts[:5]:
+                    world.set_temporal_context(
+                        f"user_fact_{fact.key}", f"{fact.key}: {fact.value}", ttl_seconds=3600
+                    )
+            memory_manager.add_episode(f"Session started. User identified: {name}.")
+            greeting = _compose_return_greeting(name=name)
+            logger.info(f"[FaceID] Greeting detected user: {name}")
+            try:
+                voice_output.speak(greeting)
+            except Exception:
+                pass
 
-        # Load user-tagged facts from memory for downstream LLM injection
-        user_facts = memory_manager.find_facts(query=name, category="user")
-        if user_facts:
-            for fact in user_facts[:5]:
-                world.set_temporal_context(
-                    f"user_fact_{fact.key}", f"{fact.key}: {fact.value}", ttl_seconds=3600
-                )
+        def _on_user_left(event: SystemEvent):
+            name = event.data.get("display_name", "User")
+            memory_manager.add_episode(f"Session ended. {name} left the camera view.")
+            logger.info(f"[FaceID] {name} left. Session logged.")
 
-        memory_manager.add_episode(f"Session started. User identified: {name}.")
-        greeting = _compose_return_greeting(name=name)
-        logger.info(f"[FaceID] Greeting detected user: {name}")
-        try:
-            voice_output.speak(greeting)
-        except Exception:
-            pass
+        def _on_unknown_user(event: SystemEvent):
+            logger.info("[FaceID] Unknown person detected.")
 
-    def _on_user_left(event: SystemEvent):
-        name = event.data.get("display_name", "User")
-        memory_manager.add_episode(f"Session ended. {name} left the camera view.")
-        logger.info(f"[FaceID] {name} left. Session logged.")
+        bus.subscribe("face.user_detected", _on_user_detected)
+        bus.subscribe("face.user_left",     _on_user_left)
+        bus.subscribe("face.unknown_user",  _on_unknown_user)
 
-    def _on_unknown_user(event: SystemEvent):
-        logger.info("[FaceID] Unknown person detected.")
+        watchdog = Watchdog([])
+        watchdog.start()
 
-    bus.subscribe("face.user_detected", _on_user_detected)
-    bus.subscribe("face.user_left", _on_user_left)
-    bus.subscribe("face.unknown_user", _on_unknown_user)
-    # ──────────────────────────────────────────────────────────────
-    
-    watchdog = Watchdog([])
-    watchdog.start()
-    
-    scheduler = ActionScheduler(executor)
-    scheduler.start()
-    
-    personality_manager = PersonalityManager()
-    reasoning_engine.personality_manager = personality_manager
+        scheduler = ActionScheduler(executor)
+        scheduler.start()
 
-    # ── Safety Sandbox (wire voice output for announcements) ──────────────
-    safety_sandbox.voice_output = voice_output
-    logger.info("[Safety] Sandbox ready with voice output.")
+        personality_manager = PersonalityManager()
+        reasoning_engine.personality_manager = personality_manager
 
-    # Phase 2: Deep Cognition Setup
-    semantic_db = SemanticDB(Path("data/semantic_db.json"), embedder_func=llm_client.embed)
-    memory_manager.set_semantic_db(semantic_db)
-    reasoning_engine.semantic_db = semantic_db
-    auto_corrector = ReinforcementFeedbackLoop(semantic_db)
+        safety_sandbox.voice_output = voice_output
+        logger.info("[Safety] Sandbox ready with voice output.")
 
-    # ── Structured Memory System ──────────────────────────────────────────
-    vector_store = VectorMemoryStore(
-        storage_dir=memory_root,
-        embed_fn=llm_client.embed,
-    )
-    vector_store.seed_system_memories()  # No-op if already seeded
-    memory_retriever = MemoryRetriever(vector_store, max_results=5)
-    memory_prompt_builder = MemoryPromptBuilder(max_entries=10, max_chars=2000)
-    memory_writer = MemoryWriter(vector_store)
+        # Phase 2: Deep Cognition
+        semantic_db = SemanticDB(Path("data/semantic_db.json"), embedder_func=llm_client.embed)
+        memory_manager.set_semantic_db(semantic_db)
+        reasoning_engine.semantic_db = semantic_db
+        auto_corrector = ReinforcementFeedbackLoop(semantic_db)
 
-    reasoning_engine.memory_retriever = memory_retriever
-    reasoning_engine.memory_writer = memory_writer
-    reasoning_engine.memory_prompt_builder = memory_prompt_builder
-    logger.info(
-        f"[StructuredMemory] Initialized. Vector store: {vector_store.count()} entries. "
-        f"FAISS index at: {vector_store._index_path}"
-    )
-    
-    # Phase 3: Perception Fusion Setup
-    semantic_vision = SemanticVisionEngine()
-    semantic_vision.start()
-    
-    intent_fusion = UnifiedIntentEngine()
+        # ── Structured Memory System ──────────────────────────────────
+        vector_store = VectorMemoryStore(
+            storage_dir=memory_root,
+            embed_fn=llm_client.embed,
+        )
+        vector_store.seed_system_memories()
+        memory_retriever = MemoryRetriever(vector_store, max_results=5)
+        memory_prompt_builder = MemoryPromptBuilder(max_entries=10, max_chars=2000)
+        memory_writer = MemoryWriter(vector_store)
 
-    # ── SYSTEM MONITOR (OS Perception) ────────────────────────────────────
-    system_monitor = SystemMonitor(poll_interval=5.0)
-    system_monitor.start()
-    logger.info("[SystemMonitor] Started — tracking OS state.")
+        reasoning_engine.memory_retriever      = memory_retriever
+        reasoning_engine.memory_writer         = memory_writer
+        reasoning_engine.memory_prompt_builder = memory_prompt_builder
 
-    screen_reader = ScreenReader(poll_interval=15.0)
-    screen_reader.start()
-    logger.info("[ScreenReader] Started — visual grounding via OCR/Windows.")
+        # Inject memory pipeline into CommandHandler
+        command_handler.memory_retriever = memory_retriever
+        command_handler.memory_writer    = memory_writer
 
-    # ── ATTENTION SYSTEM ──────────────────────────────────────────────────
-    attention.start()
-    logger.info("[Attention] System started.")
+        logger.info(
+            f"[StructuredMemory] Initialized. Vector store: {vector_store.count()} entries. "
+            f"FAISS index at: {vector_store._index_path}"
+        )
 
-    # Wire voice activity to reset system monitor idle counter
-    def _on_voice_activity(event: SystemEvent):
-        system_monitor.reset_idle()
-        attention.register_activity()
-    bus.subscribe("voice.raw_transcript", _on_voice_activity)
+        # Phase 3: Perception Fusion
+        semantic_vision = SemanticVisionEngine()
+        semantic_vision.start()
 
-    # Wire VAD interrupt to instantly silence TTS
-    def _on_voice_interrupted(event: SystemEvent):
-        # We only stop if JARVIS is actively speaking to prevent constant logs
-        if getattr(voice_output, "_is_speaking", False):
-            logger.info("[Main] VAD energy spike detected. Interrupting TTS instantly.")
-            voice_output.stop()
-            if hui_window:
-                try:
-                    hui_window.signals.log_message.emit("C4: [INTERRUPTED]")
-                except Exception:
-                    pass
-    bus.subscribe("voice.interrupted", _on_voice_interrupted)
+        intent_fusion = UnifiedIntentEngine()
 
-    # Wire emotion detection to WorldState user model
-    def _on_emotion(event: SystemEvent):
-        emotion = event.data.get("emotion", "neutral")
-        conf = event.data.get("confidence", 0.5)
-        world.set_user_emotion(emotion, conf)
-        logger.debug(f"[Emotion] {emotion} ({conf:.0%})")
-    bus.subscribe("voice.emotion_detected", _on_emotion)
+        system_monitor = SystemMonitor(poll_interval=5.0)
+        system_monitor.start()
+        logger.info("[SystemMonitor] Started.")
 
-    # Wire speaker identification to UserModel and WorldState
-    def _on_speaker_id(event: SystemEvent):
-        name = event.data.get("name", "")
-        if name:
-            user_model_mgr.set_identity(name)
-            world.update_user_model(name=name.capitalize())
-            logger.info(f"[SpeakerID] Identity set: {name}")
-    bus.subscribe("voice.speaker_identified", _on_speaker_id)
+        screen_reader = ScreenReader(poll_interval=15.0)
+        screen_reader.start()
+        logger.info("[ScreenReader] Started.")
 
-    # Wire learning.action_unreliable to voice feedback
-    def _on_unreliable(event: SystemEvent):
-        action = event.data.get("action", "unknown")
-        rate = event.data.get("fail_rate", 0)
-        msg = f"Sir, I've been having trouble with {action}. Failure rate is {rate:.0%}. I may need an alternate method."
-        try:
-            voice_output.speak(msg)
-        except Exception:
-            pass
-    bus.subscribe("learning.action_unreliable", _on_unreliable)
+        attention.start()
+        logger.info("[Attention] System started.")
 
-    # Phase 4/5/6: AGI Upgrades
-    forecaster = TrendForecaster()
-    forecaster.start()
-    
-    temporal_habits = TemporalHabitEngine(semantic_db)
-    reasoning_engine.temporal_habits = temporal_habits
-    
-    activity_inferencer = ActivityInferencer(reasoning_engine.llm)
-    activity_inferencer.start()
-    
-    coordinator = CoordinatorAgent(reasoning_engine.llm)
+        def _on_voice_activity(event: SystemEvent):
+            system_monitor.reset_idle()
+            attention.register_activity()
+        bus.subscribe("voice.raw_transcript", _on_voice_activity)
 
-    # Start Context Engine
-    context_engine = ContextEngine(vision_manager=vision_manager, memory_manager=memory_manager)
-    context_engine.governor = governor
-    context_engine.start()
-    reasoning_engine.context_engine = context_engine
+        def _on_voice_interrupted(event: SystemEvent):
+            if getattr(voice_output, "_is_speaking", False):
+                logger.info("[Main] VAD energy spike. Interrupting TTS.")
+                voice_output.stop()
+                if hui_window:
+                    try:
+                        hui_window.signals.log_message.emit("C4: [INTERRUPTED]")
+                    except Exception:
+                        pass
+        bus.subscribe("voice.interrupted", _on_voice_interrupted)
 
-    # Inject voice output into reasoning engine for "thinking" acknowledgements
-    reasoning_engine._voice_output = voice_output
+        def _on_emotion(event: SystemEvent):
+            emotion = event.data.get("emotion", "neutral")
+            conf    = event.data.get("confidence", 0.5)
+            world.set_user_emotion(emotion, conf)
+        bus.subscribe("voice.emotion_detected", _on_emotion)
 
-    # Start Autonomous Agent
-    autonomous_agent = AutonomousAgent(
-        context_engine=context_engine,
-        reasoning_engine=reasoning_engine,
-        hui_window=hui_window,
-        voice_output=voice_output
-    )
-    autonomous_agent.start()
+        def _on_speaker_id(event: SystemEvent):
+            name = event.data.get("name", "")
+            if name:
+                user_model_mgr.set_identity(name)
+                world.update_user_model(name=name.capitalize())
+                logger.info(f"[SpeakerID] Identity set: {name}")
+        bus.subscribe("voice.speaker_identified", _on_speaker_id)
 
-    # Create and keep reference to the Gesture Action Executor
-    gesture_executor = ActionExecutor()
+        def _on_unreliable(event: SystemEvent):
+            action = event.data.get("action", "unknown")
+            rate   = event.data.get("fail_rate", 0)
+            msg = (f"Sir, I've been having trouble with {action}. "
+                   f"Failure rate is {rate:.0%}. I may need an alternate method.")
+            try:
+                voice_output.speak(msg)
+            except Exception:
+                pass
+        bus.subscribe("learning.action_unreliable", _on_unreliable)
 
-    # Start AI loop in background
-    ai_thread = threading.Thread(target=main_loop, daemon=True)
-    ai_thread.start()
+        # Phase 4/5/6: AGI Upgrades
+        forecaster = TrendForecaster()
+        forecaster.start()
 
-    # Run GUI loop
+        temporal_habits = TemporalHabitEngine(semantic_db)
+        reasoning_engine.temporal_habits = temporal_habits
+
+        activity_inferencer = ActivityInferencer(reasoning_engine.llm)
+        activity_inferencer.start()
+
+        coordinator = CoordinatorAgent(reasoning_engine.llm)
+
+        context_engine = ContextEngine(vision_manager=vision_manager, memory_manager=memory_manager)
+        context_engine.governor = governor
+        context_engine.start()
+        reasoning_engine.context_engine = context_engine
+
+        reasoning_engine._voice_output = voice_output
+
+        autonomous_agent = AutonomousAgent(
+            context_engine=context_engine,
+            reasoning_engine=reasoning_engine,
+            hui_window=hui_window,
+            voice_output=voice_output,
+        )
+        autonomous_agent.start()
+
+        gesture_executor = ActionExecutor()
+
+        # Start AI voice loop in background thread
+        ai_thread = threading.Thread(target=main_loop, daemon=True)
+        ai_thread.start()
+        logger.info("[Main] All subsystems started. AI thread running.")
+
+    # Schedule deferred startup to run once Qt event loop is alive
+    # intent_fusion is used inside process_input — initialise a placeholder
+    # so the closure doesn't crash before deferred_startup replaces it.
+    intent_fusion = type('_Noop', (), {'fuse_context': staticmethod(lambda t: t)})()
+    QTimer.singleShot(0, _deferred_startup)
+
+    # Run GUI loop (blocks until window closes)
     sys.exit(app.exec_())
 
 
@@ -573,7 +617,6 @@ def run_safe() -> None:
     try:
         run()
     except SystemExit:
-        # Normal exit (e.g., window closed)
         pass
     except BaseException:
         import traceback
@@ -586,4 +629,3 @@ def run_safe() -> None:
 
 if __name__ == "__main__":
     run_safe()
-
