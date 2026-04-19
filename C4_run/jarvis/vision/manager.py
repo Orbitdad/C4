@@ -122,24 +122,7 @@ class VisionManager:
                     VisionManager._CONNECTION_SPEC = None
         return VisionManager._LANDMARK_SPEC, VisionManager._CONNECTION_SPEC
 
-    def _detect_gesture_label(self, lm) -> tuple:
-        """Return (label_str, BGR_colour) for the current landmark set."""
-        import math
-        index_up  = lm[8].y  < lm[6].y
-        middle_up = lm[12].y < lm[10].y
-        ring_up   = lm[16].y < lm[14].y
-        pinky_up  = lm[20].y < lm[18].y
-        pinch_dist = math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y)
-        fist = not index_up and not middle_up and not ring_up and not pinky_up
-        if fist:
-            return "FIST · PAUSE",  (0, 80, 255)
-        if pinch_dist < 0.05:
-            return "PINCH · CLICK", (0, 255, 80)
-        if index_up and middle_up and not ring_up and not pinky_up:
-            return "SCROLL",        (0, 200, 255)
-        if index_up and not middle_up and not ring_up and not pinky_up:
-            return "MOVING",        (255, 200, 0)
-        return "GESTURE",           (200, 200, 200)
+
 
     def _run_loop(self) -> None:
         frame_idx = 0
@@ -175,17 +158,7 @@ class VisionManager:
                             lm_spec,
                             conn_spec,
                         )
-                        # ── Gesture label overlay ──────────────────────────
-                        label, colour = self._detect_gesture_label(hand_lms.landmark)
-                        h_fr, w_fr = annotated.shape[:2]
-                        wrist_x = int(hand_lms.landmark[0].x * w_fr)
-                        wrist_y = int(hand_lms.landmark[0].y * h_fr)
-                        cv2.putText(
-                            annotated, label,
-                            (max(wrist_x - 40, 5), max(wrist_y + 30, 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65,
-                            colour, 2, cv2.LINE_AA,
-                        )
+
                     all_hands = [h.landmark for h in results.multi_hand_landmarks] if results.multi_hand_landmarks else []
                     # Extract index finger tip (landmark id 8) for UI updates of all hands
                     for h in all_hands:
@@ -204,10 +177,9 @@ class VisionManager:
                             self.mp_draw.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
                         )
                     
-                    pose_lms = pose_results.pose_landmarks.landmark if pose_results and pose_results.pose_landmarks else None
                     
-                    # Pass ALL hands AND POSE to the gesture controller
-                    debug_dict = self.gesture_controller.process_all_hands(all_hands, pose_lms)
+                    # Pass ALL hands to the gesture controller (pose is no longer used for gestures)
+                    debug_dict = self.gesture_controller.process_all_hands(all_hands)
                     
                     if self.hui_window and debug_dict:
                         if hasattr(self.hui_window.signals, 'update_gesture_debug'):

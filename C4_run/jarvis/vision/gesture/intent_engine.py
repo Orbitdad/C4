@@ -1,118 +1,148 @@
 """
 jarvis/vision/gesture/intent_engine.py
 
-Infer *user intent* from gesture data + motion characteristics.
-Pure logic — no OS calls.
+Maps raw gesture classifications into universal semantic intents.
+Manages internal state (like hold durations for drag).
 """
-from __future__ import annotations
 
-from typing import Dict, List, Optional
-
-
-# ── Intent constants ──────────────────────────────────────────────────────────
-class Intent:
-    CLICK      = "CLICK"
-    SCROLL     = "SCROLL"
-    DRAG       = "DRAG"
-    NAVIGATE   = "NAVIGATE"
-    COMMAND    = "COMMAND"
-    PAUSE      = "PAUSE"
-    MOVE_CURSOR = "MOVE_CURSOR"
-    NONE       = "NONE"
-
-
-class Mode:
-    NORMAL    = "NORMAL"
-    PRECISION = "PRECISION"   # slow, deliberate movement
-    FAST      = "FAST"        # quick sweep — likely navigation
-
-
-# ── Gesture → baseline intent mapping ────────────────────────────────────────
-_GESTURE_INTENT: Dict[str, str] = {
-    "PINCH":     Intent.CLICK,
-    "SCROLL":    Intent.SCROLL,
-    "MOVE":      Intent.MOVE_CURSOR,
-    "FIST":      Intent.PAUSE,
-    "OPEN_PALM": Intent.COMMAND,
-    "SWIPE_LEFT":  Intent.NAVIGATE,
-    "SWIPE_RIGHT": Intent.NAVIGATE,
-    "SWIPE_UP":    Intent.NAVIGATE,
-    "SWIPE_DOWN":  Intent.NAVIGATE,
-    "CIRCLE":    Intent.COMMAND,
-}
-
+import time
+from typing import Dict, Any, List
+from .gesture_config import DEFAULTS
+from .detector import HandDetector
+import math
 
 class IntentEngine:
-    """
-    Maps a gesture event + velocity into a structured intent dict.
+    def __init__(self):
+        self.hold_threshold = DEFAULTS["hold_duration"]
+        self.confidence_min = DEFAULTS["confidence_min"]
+        self.debounce_frames = DEFAULTS["debounce_frames"]
+        
+        # State tracking
+        self.current_gesture = "NONE"
+        self.gesture_frames = 0
+        
+        self.current_intent = "IDLE"
+        self.pinch_start_time = 0.0
+        self.is_dragging = False
 
-    Output of :meth:`infer`::
+    def process(self, gesture: str, pos: tuple, hands_list: List[Any], mode: str) -> dict:
+        """
+        Maps the raw gesture to an Intent and formats the required output payload.
+        Handles both 1-hand semantic intent mapping and 2-hand dual interactions.
+        """
+        # 1. Debouncing 
+        if gesture == self.current_gesture:
+            self.gesture_frames += 1
+        else:
+            self.current_gesture = gesture
+            self.gesture_frames = 1
+            
+        confidence = min(1.0, self.gesture_frames / max(1, self.debounce_frames))
+        
+        # Fallback if unconfident or lost tracking
+        if confidence < self.confidence_min or gesture == "NONE":
+             # Need to cleanly end a drag if we lose tracking
+             if self.is_dragging:
+                 self.is_dragging = False
+                 self.pinch_start_time = 0.0
+                 return self._build_intent("DROP", pos, confidence)
+             return self._build_intent("IDLE", pos, confidence)
 
-        {
-            "intent": str,  # e.g. "CLICK", "SCROLL", "NAVIGATE"
-            "mode":   str,  # "NORMAL" | "PRECISION" | "FAST"
+        # 2. Dual-hand intercepts (3D Mode features)
+        if mode == "INTERACTION_3D" and len(hands_list) >= 2:
+            return self._process_dual_hand(gesture, hands_list, pos, confidence)
+
+        # 3. Universal Single-Hand Intent Mapping
+        return self._process_single_hand(gesture, pos, confidence)
+
+    def _process_single_hand(self, gesture: str, pos: tuple, confidence: float) -> dict:
+        """Map a single hand gesture to a universal intent."""
+        
+        # PINCH FSM -> SELECT, DRAG, DROP
+        if gesture == "PINCH":
+            if not self.is_dragging:
+                if self.pinch_start_time == 0.0:
+                    self.pinch_start_time = time.time()
+                    return self._build_intent("SELECT", pos, confidence) # First frame of pinch = click
+                elif time.time() - self.pinch_start_time > self.hold_threshold:
+                    self.is_dragging = True
+                    return self._build_intent("DRAG", pos, confidence)
+            else:
+                return self._build_intent("DRAG", pos, confidence)
+        else:
+            # Not pinching
+            if self.is_dragging:
+                # We were dragging, now we aren't -> DROP
+                self.is_dragging = False
+                self.pinch_start_time = 0.0
+                return self._build_intent("DROP", pos, confidence)
+                
+            self.pinch_start_time = 0.0
+
+            # 1:1 Static Mappings
+            if gesture == "POINT":
+                return self._build_intent("TARGET", pos, confidence)
+            elif gesture == "OPEN_PALM":
+                return self._build_intent("IDLE", pos, confidence)
+            elif gesture == "FIST":
+                return self._build_intent("CANCEL", pos, confidence)
+                
+            # Dynamic Mappings (One-shots)
+            elif "SWIPE" in gesture:
+                # Note: Nav directions could be added to payload metadata if needed
+                # For now, UI router handles it, we just send NAVIGATE
+                nav_dir = "left" if "LEFT" in gesture else "right"
+                return self._build_intent("NAVIGATE", pos, confidence, {"direction": nav_dir})
+            elif gesture == "PUSH":
+                return self._build_intent("CONFIRM", pos, confidence)
+            elif gesture == "PULL":
+                return self._build_intent("BACK", pos, confidence)
+
+        return self._build_intent("IDLE", pos, confidence)
+
+    def _process_dual_hand(self, primary_gesture: str, hands_list: List[Any], pos: tuple, confidence: float) -> dict:
+        """Evaluate dual hand geometries for SCALE/ROTATE."""
+        hand1 = hands_list[0]
+        hand2 = hands_list[1]
+        
+        # Helper to check if BOTH hands are pinching
+        def is_pinching(lm):
+            idx = HandDetector.get_index_tip(lm)
+            thb = HandDetector.get_thumb_tip(lm)
+            dist = math.hypot(idx[0] - thb[0], idx[1] - thb[1])
+            return dist < DEFAULTS["pinch_threshold"]
+
+        h1_pinch = is_pinching(hand1)
+        h2_pinch = is_pinching(hand2)
+
+        if h1_pinch and h2_pinch:
+             # Both hands pinch -> SCALE
+             # Calculate distance between the two pinches
+             h1_idx = HandDetector.get_index_tip(hand1)
+             h2_idx = HandDetector.get_index_tip(hand2)
+             dist = math.hypot(h1_idx[0] - h2_idx[0], h1_idx[1] - h2_idx[1])
+             return self._build_intent("SCALE", pos, confidence, {"distance": dist})
+             
+        elif primary_gesture == "POINT":
+             # We can infer two-hand rotation if pointing and moving
+             # (Simplification: using dual wrists for rotation angle)
+             w1 = HandDetector.get_wrist(hand1)
+             w2 = HandDetector.get_wrist(hand2)
+             angle = math.atan2(w2[1] - w1[1], w2[0] - w1[0])
+             return self._build_intent("ROTATE", pos, confidence, {"angle": angle})
+
+        # If no dual-hand specific interaction, fallback to primary hand intent
+        return self._process_single_hand(primary_gesture, pos, confidence)
+
+    def _build_intent(self, intent_name: str, pos: tuple, confidence: float, meta: dict = None) -> dict:
+        self.current_intent = intent_name
+        data = {
+            "intent": intent_name,
+            "x": pos[0],
+            "y": pos[1],
+            "z": pos[2],
+            "confidence": confidence
         }
-    """
-
-    # Velocity thresholds (normalised units / second)
-    PRECISION_THRESHOLD: float = 0.30   # below → PRECISION
-    FAST_THRESHOLD:      float = 1.50   # above → FAST
-
-    def __init__(self, config: Optional[Dict] = None) -> None:
-        cfg = config or {}
-        self.precision_threshold = cfg.get("velocity_precision_threshold", self.PRECISION_THRESHOLD)
-        self.fast_threshold      = cfg.get("velocity_fast_threshold",      self.FAST_THRESHOLD)
-        self.mode: str = Mode.NORMAL
-
-    # ── Public API ────────────────────────────────────────────────────────────
-
-    def infer(self, gesture_data: Dict) -> Dict:
-        """
-        Infer intent and operating mode from a gesture event.
-
-        :param gesture_data: Output from :class:`GestureDetector`.
-        :returns: ``{"intent": str, "mode": str}``
-        """
-        gesture  = gesture_data.get("gesture", "NONE")
-        velocity = gesture_data.get("velocity", 0.0)
-
-        intent = _GESTURE_INTENT.get(gesture, Intent.NONE)
-        self.mode = self.detect_mode(velocity)
-
-        # Refine intent with mode context
-        if intent == Intent.MOVE_CURSOR and self.mode == Mode.FAST:
-            intent = Intent.NAVIGATE   # fast move → navigation intent
-
-        return {"intent": intent, "mode": self.mode}
-
-    def calculate_velocity(self, history: List) -> float:
-        """
-        Compute average velocity from a list of (x, y, timestamp) tuples.
-
-        Convenience method when the caller holds their own history buffer.
-        """
-        if len(history) < 2:
-            return 0.0
-
-        total_dist = 0.0
-        total_time = 0.0
-        for i in range(1, len(history)):
-            x0, y0, t0 = history[i - 1]
-            x1, y1, t1 = history[i]
-            import math
-            total_dist += math.hypot(x1 - x0, y1 - y0)
-            total_time += max(t1 - t0, 1e-6)
-
-        return total_dist / total_time if total_time > 0 else 0.0
-
-    def detect_mode(self, velocity: float) -> str:
-        """
-        Map a scalar velocity to an operating mode.
-
-        :returns: ``"PRECISION"`` | ``"NORMAL"`` | ``"FAST"``
-        """
-        if velocity < self.precision_threshold:
-            return Mode.PRECISION
-        if velocity > self.fast_threshold:
-            return Mode.FAST
-        return Mode.NORMAL
+        if meta:
+            data.update(meta)
+        return data

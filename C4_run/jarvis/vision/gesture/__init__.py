@@ -2,127 +2,114 @@
 jarvis/vision/gesture/__init__.py
 
 Entry point for the Gesture Interaction System.
-Integrates detector, tracker, classifier, state manager, mapper, and emitter.
+Integrates the intent-based pipeline: Gesture -> Intent -> Context Router -> Action.
 """
 
 from .detector import HandDetector
 from .tracker import HandTracker
 from .classifier import GestureClassifier
-from .state_manager import StateManager
-from .mapper import GestureMapper
-from .emitter import GestureEmitter
-from .interpreter import GestureInterpreter
+from .intent_engine import IntentEngine
+from .context_router import ContextRouter
+from .action_executor import ActionExecutor
+from .gesture_config import DEFAULTS
+from jarvis.core.event_bus import bus, SystemEvent
+import time
 
 class GestureController:
     """
     Main controller that coordinates the modular gesture pipeline.
     """
     def __init__(self):
-        self.detector = HandDetector()
-        self.tracker = HandTracker(window_size=5)
         self.classifier = GestureClassifier()
-        self.fsm = StateManager()
-        self.interpreter = GestureInterpreter()
-        self.mapper = GestureMapper()
-        self.emitter = GestureEmitter()
+        self.intent_engine = IntentEngine()
+        self.router = ContextRouter()
+        
+        # We need a tracker per hand
+        self.trackers = {
+            0: HandTracker(window_size=DEFAULTS["smoothing_window"]),
+            1: HandTracker(window_size=DEFAULTS["smoothing_window"])
+        }
+        
+        # The executor is instantiated here to ensure it binds to the bus
+        self.executor = ActionExecutor(
+             smoothing=DEFAULTS["cursor_smoothing"], 
+             frame_margin=DEFAULTS["frame_margin"]
+        )
         
         self.enabled = True
+        self.mode = "UI_MODE"
+        self.dual_hand_frames = 0
+        self.single_hand_frames = 0
 
     def process_all_hands(self, hands_list, pose_landmarks=None):
         """
-        Process all detected hands and full body pose if available.
+        Process all detected hands through the intent pipeline.
+        Returns debug dict for the HUI overlay.
         """
         if not self.enabled:
-            return
-
-        # 1. First, check full-body macro gestures if pose is available.
-        if pose_landmarks:
-            pose_gesture = self.classifier.classify_pose(pose_landmarks)
-            if pose_gesture != "NONE":
-                # If we detect a macro pose, we inject it directly
-                # We skip hand processing so it doesn't conflict
-                raw_gesture = pose_gesture
-                return self.process_landmarks(None, raw_gesture)
+            return None
 
         if not hands_list:
-            return
+            self._update_mode(0)
+            # Send loss of tracking to intent engine to force DROP if dragging
+            intent = self.intent_engine.process("NONE", (0,0,0), hands_list, self.mode)
+            self.router.route_intent(intent, self.mode)
+            return None
 
-        # Always feed the first hand to the classifier for backwards parity
-        raw_gesture = self.classifier.classify(hands_list[0])
+        self._update_mode(len(hands_list))
+
+        primary_hand = hands_list[0]
         
-        # Intercept with our new Interpreter
-        interp_res = self.interpreter.process(raw_gesture, hands_list)
+        # 1. Classify raw gesture
+        raw_gesture = self.classifier.classify(primary_hand)
         
-        # We can fire TRANSFORM actions directly if confidence is high enough
-        if interp_res["type"] == "TRANSFORM":
-            # For continuous transforms, we want to bypass the discrete StateManager
-            # But we still map it and fuse it
-            action_dict = {
-                "action": interp_res["action"],
-                "type": "TRANSFORM",
-                "delta": interp_res["delta"],
-                "confidence": interp_res["confidence"]
-            }
-            # For HUI visualization and state updates via Emmitter
-            self.emitter.emit_detection(interp_res["action"], interp_res["state"], (0,0,0))
-            # Just push directly to bus for the fusion_engine to resolve via fallback
-            # Our modified emitter can take a dict or string, here we fallback to emitting dict via a special event or rely on action executor directly...
-            # The ActionExecutor needs an action dict. Let's rely on standard event bus `gesture.action`
-            import jarvis.core.event_bus as event_bus
-            event_bus.bus.publish(event_bus.SystemEvent(name="gesture.action", data=action_dict))
-            
-            return interp_res
-            
-        # If not TRANSFORM, use original process_landmarks for single hand discrete gestures
-        return self.process_landmarks(hands_list[0], raw_gesture)
-
-    def process_landmarks(self, landmarks, raw_gesture=None):
-        """
-        Process raw landmarks from vision manager (Primary hand).
-        """
-        if not self.enabled:
-            return
-            
-        if not landmarks and raw_gesture is None:
-            return
-
-        # 1. Pose Smoothing (Skip if no hand landmarks, just use center)
-        smooth_pos = (0.5, 0.5, 0.5)
-        if landmarks:
-            raw_pos = self.detector.get_index_tip(landmarks)
-            smooth_pos = self.tracker.smooth(raw_pos)
-
-        # 2. Gesture Recognition
-        if raw_gesture is None:
-            gesture = self.classifier.classify(landmarks)
-        else:
-            gesture = raw_gesture
-
-        # 3. State Management
-        state = self.fsm.update(gesture)
-
-        # 4. Action Mapping
-        action = self.mapper.map_to_action(gesture, state)
-
-        # 5. Event Emission
-        self.emitter.emit_detection(gesture, state, smooth_pos)
-        if action != "NONE":
-            self.emitter.emit_action(action)
+        # 2. Smooth position tracking
+        idx_tip = HandDetector.get_index_tip(primary_hand)
+        smooth_pos = self.trackers[0].smooth(idx_tip)
         
+        # Support dual hand tracking smoothing if needed
+        if len(hands_list) >= 2:
+            idx2 = HandDetector.get_index_tip(hands_list[1])
+            self.trackers[1].smooth(idx2)
+
+        # 3. Map to Intent (handles single and dual-hand overrides internally)
+        intent = self.intent_engine.process(raw_gesture, smooth_pos, hands_list, self.mode)
+        
+        # 4. Route Intent to Action
+        self.router.route_intent(intent, self.mode)
+
+        # Return standard debug dictionary for HUI
         return {
-            "gesture": gesture,
-            "state": state,
-            "action": action,
-            "pos": smooth_pos
+            "gesture": intent["intent"], # We surface the INTENT to the UI
+            "pos": smooth_pos,
+            "mode": self.mode,
+            "raw": raw_gesture
         }
 
-# For backward compatibility if needed, but we are refactoring.
+    def _update_mode(self, hand_count: int):
+        """Implement hysteresis for mode switching."""
+        if hand_count >= 2:
+            self.dual_hand_frames += 1
+            self.single_hand_frames = 0
+            if self.dual_hand_frames >= DEFAULTS["dual_hand_entry_frames"] and self.mode != "INTERACTION_3D":
+                self.mode = "INTERACTION_3D"
+                bus.publish(SystemEvent("gesture.mode_change", {"mode": self.mode}))
+        elif hand_count == 1:
+            self.single_hand_frames += 1
+            self.dual_hand_frames = 0
+            if self.single_hand_frames >= DEFAULTS["dual_hand_exit_frames"] and self.mode != "UI_MODE":
+                self.mode = "UI_MODE"
+                bus.publish(SystemEvent("gesture.mode_change", {"mode": self.mode}))
+        else:
+             # If 0 hands, we keep the current mode so state doesn't wipe randomly on a dropped frame
+             pass
+
 __all__ = [
     'GestureController',
     'HandDetector',
     'HandTracker',
     'GestureClassifier',
-    'StateManager',
-    'GestureMapper',
-    'GestureEmitter'
+    'IntentEngine',
+    'ContextRouter',
+    'ActionExecutor'
 ]

@@ -25,9 +25,9 @@ class HandsOverlay(QWidget):
         self.signals = signals
         if self.signals:
             if hasattr(self.signals, 'update_gesture_debug'):
-                self.signals.update_gesture_debug.connect(self.on_gesture_update)
+                self.signals.update_gesture_debug.connect(self.on_gesture_update, Qt.QueuedConnection)
             if hasattr(self.signals, 'update_landmarks'):
-                self.signals.update_landmarks.connect(self.on_landmarks_update)
+                self.signals.update_landmarks.connect(self.on_landmarks_update, Qt.QueuedConnection)
                 
         self.primary_pos = None # (x_norm, y_norm)
         self.current_gesture = "NONE"
@@ -109,15 +109,34 @@ class HandsOverlay(QWidget):
             cx = int(x_norm * w)
             cy = int(y_norm * h)
             
-            is_pinching = self.current_gesture == "PINCH"
-            is_fist = self.current_gesture == "FIST"
+            is_pinching = self.current_gesture in ["SELECT", "DRAG"]
+            is_fist = self.current_gesture == "CANCEL"
+            is_nav = self.current_gesture == "NAVIGATE"
             
-            base_color = QColor(255, 60, 60) if is_pinching else (QColor(0, 80, 255) if is_fist else QColor(0, 255, 200))
+            # Colors: DRAG=Orange, SELECT=Green, CANCEL=Red, NAV=Purple, default TARGET=Cyan
+            if self.current_gesture == "DRAG":
+                 base_color = QColor(255, 140, 0)
+            elif self.current_gesture == "SELECT":
+                 base_color = QColor(0, 255, 80)
+            elif is_fist:
+                 base_color = QColor(255, 40, 40)
+            elif is_nav:
+                 base_color = QColor(140, 0, 255)
+            else:
+                 base_color = QColor(0, 255, 200)
+
             glow_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 100)
             
-            # Dynamic radii
-            r_outer = 30 if is_pinching else 45
-            r_inner = 15 if is_pinching else (25 + math.sin(self.pulse) * 2)
+            # Dynamic radii based on intent
+            if is_pinching:
+                r_outer = 25
+                r_inner = 10
+            elif is_nav:
+                r_outer = 45 + (math.sin(self.pulse * 3) * 5) # Fast pulse for nav
+                r_inner = 20
+            else:
+                r_outer = 45
+                r_inner = 25 + math.sin(self.pulse) * 2
             
             # Glow
             painter.setPen(Qt.NoPen)
@@ -144,6 +163,10 @@ class HandsOverlay(QWidget):
             
             # Optional tag
             if is_pinching:
-                painter.setPen(QColor(255, 60, 60))
+                painter.setPen(base_color)
                 painter.setFont(painter.font())
-                painter.drawText(cx + 35, cy, "LOCKED")
+                painter.drawText(cx + 35, cy + 5, self.current_gesture)
+            elif is_nav or is_fist:
+                painter.setPen(base_color)
+                painter.setFont(painter.font())
+                painter.drawText(cx + 40, cy + 5, self.current_gesture)

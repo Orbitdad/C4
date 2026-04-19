@@ -286,7 +286,7 @@ def run() -> None:
     # ── EventBus Subscriptions for HUI ──────────────────────────────────
     def _on_thinking_update(event: SystemEvent):
         if hui_window:
-            hui_window.thinking_panel.set_thinking(
+            hui_window.signals.thinking_plan.emit(
                 event.data.get("task_type", "general"),
                 event.data.get("intent", "unknown"),
                 event.data.get("steps", [])
@@ -294,7 +294,7 @@ def run() -> None:
             
     def _on_thinking_step_status(event: SystemEvent):
         if hui_window:
-            hui_window.thinking_panel.update_step_status(
+            hui_window.signals.thinking_step_status.emit(
                 event.data.get("step_idx", 0),
                 event.data.get("status", "")
             )
@@ -308,18 +308,18 @@ def run() -> None:
             idx = panels.index(current)
             if action == "SWIPE_RIGHT":
                 new_idx = (idx + 1) % len(panels)
-                hui_window.set_focused_panel(panels[new_idx])
+                QTimer.singleShot(0, lambda: hui_window.set_focused_panel(panels[new_idx]))
             elif action == "SWIPE_LEFT":
                 new_idx = (idx - 1) % len(panels)
-                hui_window.set_focused_panel(panels[new_idx])
+                QTimer.singleShot(0, lambda: hui_window.set_focused_panel(panels[new_idx]))
             elif action == "PINCH":
                 # Single pinch: visual select / glitch effect
-                hui_window.trigger_glitch()
-                hui_window._log_message(f"HUI: Selection confirmed on {current.upper()}")
+                QTimer.singleShot(0, lambda: hui_window.trigger_glitch())
+                hui_window.signals.log_message.emit(f"HUI: Selection confirmed on {current.upper()}")
             elif action == "HOLD":
                 # Hold gesture: confirm any pending CommandHandler plan
-                hui_window._log_message("HUI: HOLD detected — confirming pending command.")
-                hui_window.set_command_active(current, True)
+                hui_window.signals.log_message.emit("HUI: HOLD detected — confirming pending command.")
+                QTimer.singleShot(0, lambda: hui_window.set_command_active(current, True))
                 command_handler.confirm_pending()
         except ValueError:
             hui_window.focused_panel = "vision"
