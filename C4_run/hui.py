@@ -1242,19 +1242,15 @@ class HUIDashboard(QMainWindow):
     # ── Boot Sequence ─────────────────────────────────────────────────────────
 
     def _start_boot_sequence(self):
-        """Animate panels revealing one-by-one on startup."""
+        """Instantly set up panels without size changing animations."""
         self._boot_step = 0
-        # Hide all panels initially
-        for panel in self.panels.values():
-            panel.setVisible(False)
-
+        
         boot_order = ["system", "vision", "globe", "metrics", "network", "log"]
-        delay = 0
-        for i, name in enumerate(boot_order):
-            delay += 220
-            step = i
-            QTimer.singleShot(delay, lambda n=name, s=step: self._reveal_panel(n, s))
-        QTimer.singleShot(delay + 500, self._boot_complete_event)
+        for name in boot_order:
+            self._log_message(f"SYSTEM: Module '{name.upper()}' online.")
+
+        self.trigger_glitch()
+        self._boot_complete_event()
 
     def _reveal_panel(self, name: str, step: int):
         if name in self.panels:

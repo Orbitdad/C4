@@ -108,7 +108,7 @@ class ActionHandler:
         resolved = self._ACTION_ALIAS.get(action.lower(), action.lower())
 
         # Special: coding task → route to deepseek-coder
-        if resolved == "code" or task_type == "coding":
+        if resolved == "code" or (task_type == "coding" and resolved in ("create_file", "update_file")):
             return self._handle_code(action, params)
 
         # Special: tell_user is a log-only action

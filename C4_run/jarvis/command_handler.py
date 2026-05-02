@@ -6,7 +6,7 @@ Flow:
   User Input (text / voice / gesture)
     → retrieve_memory (top 3–5 hits)
     → build prompt with context
-    → qwen:14b via plan_with_qwen()  →  {intent, task_type, steps}
+    → qwen2:7b via plan_with_qwen()  →  {intent, task_type, steps}
     → emit UI updates (ThinkingPanel)
     → ActionHandler executes steps sequentially
     → store results to memory
@@ -37,7 +37,7 @@ class CommandHandler:
     Centralized command handler that orchestrates the full AI pipeline.
 
     Attributes:
-        planner        – TaskPlanner (wraps qwen:14b via plan_with_qwen)
+        planner        – TaskPlanner (wraps qwen2:7b via plan_with_qwen)
         action_handler – ActionHandler (controlled step executor)
         memory_retriever – MemoryRetriever for context injection
         memory_writer    – MemoryWriter for post-execution storage
@@ -53,6 +53,7 @@ class CommandHandler:
         memory_writer: Optional["MemoryWriter"] = None,
         hui_window: Optional["HUIDashboard"] = None,
         event_bus: Optional[Any] = None,
+        voice_output: Optional[Any] = None,
     ) -> None:
         self.planner = planner
         self.action_handler = action_handler
@@ -60,6 +61,7 @@ class CommandHandler:
         self.memory_writer = memory_writer
         self.hui = hui_window
         self.bus = event_bus
+        self.voice_output = voice_output
 
         # Pending gesture confirmation
         self._pending_plan: Optional[Dict[str, Any]] = None
@@ -129,7 +131,7 @@ class CommandHandler:
                 except Exception as e:
                     logger.warning(f"[CommandHandler] Memory retrieval failed: {e}")
 
-            # ── Step 2: Build intent + plan via qwen:14b ───────────────────────
+            # ── Step 2: Build intent + plan via qwen2:7b ───────────────────────
             self._emit_thinking_started()
 
             class _FakeIntent:
@@ -147,7 +149,7 @@ class CommandHandler:
                     f"Relevant Memory:\n{mem_text}\n\nUser request: {user_input}"
                 )
 
-            logger.info("[CommandHandler] Calling qwen:14b via plan_with_qwen...")
+            logger.info("[CommandHandler] Calling qwen2:7b via plan_with_qwen...")
             plan = self.planner.plan_with_qwen(intent, context=context)
 
             intent_label  = plan.get("intent", "unknown")
@@ -211,6 +213,10 @@ class CommandHandler:
                 results.append(msg)
                 self._emit_step_status(i, "done" if ok else "error")
                 self._emit_log(f"  ✓ {action}: {msg}" if ok else f"  ✗ {action}: {msg}")
+                
+                if action.lower() in ("tell_user", "say") and ok and self.voice_output:
+                    self.voice_output.speak(msg)
+                    
             except Exception as e:
                 logger.error(f"[CommandHandler] Step {i+1} error: {e}")
                 self._emit_step_status(i, "error")

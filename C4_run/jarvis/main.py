@@ -164,7 +164,7 @@ def run() -> None:
 
     # NLP components
     intent_parser = IntentParser(memory_manager)
-    planner = TaskPlanner(memory_manager)
+    planner = TaskPlanner(memory_manager, llm_client=llm_client)
 
     # Vision Setup
     vision_manager = VisionManager(hui_window=hui_window)
@@ -221,8 +221,14 @@ def run() -> None:
     def process_input(text_input: str, is_voice: bool = True):
         """
         Unified processing for voice and text commands.
-        Routes short-circuit skill intents through the ReasoningEngine (fast path),
-        and all user-facing commands through the CommandHandler AI pipeline.
+
+        All voice input is routed through the ReasoningEngine which:
+          - Classifies the intent (question, command, learning, etc.)
+          - For QUESTIONS: calls the LLM to answer vocally
+          - For COMMANDS: plans + executes via Executor + speaks result
+          - For SKILLS: routes to the appropriate skill handler
+
+        The CommandHandler is only used for HUI text-box submissions.
         """
         nonlocal last_interaction_time
         last_interaction_time = time.time()
@@ -240,41 +246,28 @@ def run() -> None:
             except Exception:
                 pass
 
-        # Route through the centralized CommandHandler pipeline
-        # (handles memory → plan → execute → store → UI feedback)
-        command_handler.handle(text_input, source="voice" if is_voice else "ui", context=context)
-
-        # Also run through the ReasoningEngine for skills that bypass the
-        # LLM pipeline (e.g., small_talk, time, learned commands) so we
-        # still get spoken responses for those paths.
+        # ── Classify intent first ──────────────────────────────────────────
         intent = intent_parser.parse(text_input, context)
-
-        # Only delegate non-general intents to reasoning engine to avoid double-execution
         from .nlp.schemas import IntentType
-        _fast_types = {
-            IntentType.SMALL_TALK,
-            IntentType.LEARN_FACT,
-            IntentType.LEARN_COMMAND,
-            IntentType.RUN_LEARNED_COMMAND,
-            IntentType.FEEDBACK,
-            IntentType.MEMORY_QUERY,
-            IntentType.CONTROL,
-        }
-        if intent.type in _fast_types:
-            response = reasoning_engine.handle_intent(intent, context)
-            context.add_turn(
-                user_text=text_input,
-                assistant_text=response.spoken_response,
-            )
-            if response.last_action:
-                context.last_action = response.last_action
-            if hui_window and response.spoken_response:
-                try:
-                    hui_window.signals.transcript_jarvis.emit(response.spoken_response)
-                except Exception:
-                    pass
-            if response.spoken_response:
-                voice_output.speak(response.spoken_response)
+
+        # ALL recognised intent types go through ReasoningEngine which
+        # provides spoken responses AND executes actions (open_app, etc.)
+        # via Executor.  Only truly unrecognised types fall through to the
+        # CommandHandler LLM-planning pipeline as a last resort.
+        response = reasoning_engine.handle_intent(intent, context)
+        context.add_turn(
+            user_text=text_input,
+            assistant_text=response.spoken_response,
+        )
+        if response.last_action:
+            context.last_action = response.last_action
+        if hui_window and response.spoken_response:
+            try:
+                hui_window.signals.transcript_jarvis.emit(response.spoken_response)
+            except Exception:
+                pass
+        if response.spoken_response:
+            voice_output.speak(response.spoken_response)
 
     # ── HUI Signal Connections ───────────────────────────────────────
     if hui_window:
@@ -340,6 +333,7 @@ def run() -> None:
         memory_writer=None,
         hui_window=hui_window,
         event_bus=bus,
+        voice_output=voice_output,
     )
 
     def main_loop():

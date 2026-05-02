@@ -71,7 +71,8 @@ Return ONLY raw JSON with this specific schema:
 }}
 CRITICAL RULES:
 - `task_type` MUST be "coding" if it involves writing code, scripts, html, css, or software development. Otherwise "general".
-- `action` must be a valid execution step like: open_app, create_file, delete_file, read_file, tell_time, tell_user, web_search, manage_window, navigate, run_command.
+- `action` must be a valid execution step like: open_app, create_file, delete_file, read_file, tell_time, tell_user, web_search, manage_window, navigate, run_command, code.
+- If the user is asking a question (e.g. "who is...", "what is..."), YOU MUST use the `tell_user` action to directly answer them with the `message` parameter. Do NOT use `analyze_request`.
 - Return ONLY the raw JSON string starting with {{ and ending with }}. No markdown blocks.
 """
         import json

@@ -128,24 +128,21 @@ class ReasoningEngine:
             except Exception as e:
                 logger.debug(f"[ReasoningEngine] Memory retrieval failed: {e}")
 
-        # ── Legacy fallbacks (kept for subsystems that still use them) ─────
-        if getattr(self, "context_engine", None) and self.context_engine.is_running:
-            prompt += f"\n\n--- CURRENT AMBIENT CONTEXT ---\n{self.context_engine.get_context_snapshot()}"
+        # ── Minimal World Context ──────────────────────────────────────────
+        # Only inject what the model NEEDS to generate a good response.
+        # Avoid system telemetry (CPU/RAM/battery/media) — small models
+        # hallucinate about volume/audio/muting when they see those tokens.
+        env = world_snap.get("user_environment", {})
+        usr = world_snap.get("user_model", {})
+        time_of_day = env.get("time_of_day", "unknown")
+        activity = env.get("inferred_activity", "unknown")
 
-        if getattr(self, "memory", None):
-            episodes = self.memory.get_recent_episodes(3)
-            if episodes:
-                prompt += "\n\n--- RECENT EPISODES ---\n" + "\n".join(episodes[-3:])
+        prompt += (
+            f"\n\n--- CONTEXT ---\n"
+            f"User: {usr.get('name', 'Sir')} | Time: {time_of_day}\n"
+            f"User is currently: {activity}\n"
+        )
 
-        if getattr(self, "temporal_habits", None):
-            habits = self.temporal_habits.get_likely_habits()
-            if habits:
-                 prompt += f"\n\n--- PREDICTED USER HABITS ---\nLikely current actions: {', '.join(habits)}\n"
-
-        # Inject WorldState summary for grounded reasoning
-        from jarvis.core.world_state import world
-        world_summary = world.get_context_summary()
-        prompt += f"\n\n--- WORLD STATE ---\n{world_summary}"
         return prompt
 
     # ── Meta-Cognition ────────────────────────────────────────────────────────
@@ -208,6 +205,12 @@ class ReasoningEngine:
         """
         if confidence >= 0.5:
             return None  # Confident enough
+
+        # If there's conversation history, the user is likely doing a follow-up.
+        # Let the question/command handler resolve context instead of blocking.
+        if context and context.turns:
+            logger.debug("[MetaCog] Low confidence but conversation active — treating as follow-up.")
+            return None
 
         raw = intent.raw_text.lower().strip()
 
@@ -613,31 +616,128 @@ Supported types: open_app, open_url, create_file, play_media, run_command."""
 
     def _handle_question(self, intent: Intent, context: ConversationContext) -> ReasoningResponse:
         query = intent.params.get("query", intent.raw_text)
-        facts = self._find_relevant_facts(query)
+
+        # ── Context-aware follow-up detection ──────────────────────────────
+        # If the user says something vague like "more information",
+        # "tell me about it", "what else", etc., resolve the topic from
+        # the conversation history so the LLM gets an explicit subject.
+        resolved_query = self._resolve_followup_topic(query, context)
+
+        facts = self._find_relevant_facts(resolved_query)
         facts_str = ""
         if facts:
             facts_str = "\nRelevant stored facts: " + ", ".join(f"{f.key}={f.value}" for f in facts[:5])
 
         # Fallback: answer from facts when LLM fails or question is about stored info
-        if facts and self._is_fact_based_question(query):
-            answer = self._answer_from_facts(query, facts)
+        if facts and self._is_fact_based_question(resolved_query):
+            answer = self._answer_from_facts(resolved_query, facts)
             if answer:
                 return ReasoningResponse(spoken_response=answer)
 
-        prompt = f"User asked: {query}{facts_str}\nProvide a concise, accurate answer in 1-3 sentences."
+        # Build a prompt that explicitly references conversation context
+        history = context.to_prompt_history()
+        if resolved_query != query and history:
+            # Enriched follow-up: remind the LLM what we were discussing
+            prompt = (
+                f"The user is continuing the conversation. They previously asked about "
+                f"the topic below and now want more detail.\n"
+                f"Resolved topic: {resolved_query}\n"
+                f"User's exact words: \"{query}\"\n"
+                f"{facts_str}\n"
+                f"Provide a detailed, informative answer. Keep it natural and conversational."
+            )
+        else:
+            prompt = f"User asked: {resolved_query}{facts_str}\nProvide a concise, accurate answer in 1-3 sentences."
+
+        # Debug: dump the exact prompt to a file to inspect for hallucinations
+        try:
+            with open("C:\\C4\\C4_run\\debug_llm_prompt.txt", "w", encoding="utf-8") as f:
+                f.write(f"--- SYSTEM MESSAGE ---\n{self._get_dynamic_system_prompt()}\n\n")
+                f.write(f"--- HISTORY ---\n{history}\n\n")
+                f.write(f"--- PROMPT ---\n{prompt}\n")
+        except Exception:
+            pass
+
         answer = self.llm.generate(
             prompt,
             system_message=self._get_dynamic_system_prompt(),
-            history=context.to_prompt_history()
+            history=history,
         )
         if not answer or answer.startswith("[Error"):
             # Fallback to facts when LLM fails
             if facts:
                 return ReasoningResponse(
-                    spoken_response=self._answer_from_facts(query, facts) or "I could not process that. Please try again."
+                    spoken_response=self._answer_from_facts(resolved_query, facts) or "I could not process that. Please try again."
                 )
             return ReasoningResponse(spoken_response="I could not process that question. Please try again.")
         return ReasoningResponse(spoken_response=answer)
+
+    def _resolve_followup_topic(self, query: str, context: ConversationContext) -> str:
+        """
+        Detect vague follow-up queries and resolve them using conversation history.
+
+        Examples:
+          - "tell me more about it" → "tell me more about Narendra Modi"
+          - "give me more information" → "give me more information about Narendra Modi"
+          - "what else" → resolves to last discussed topic
+        """
+        q = query.lower().strip()
+
+        # Patterns that indicate a context-dependent follow-up
+        followup_patterns = [
+            "more information", "tell me more", "more about", "what else",
+            "elaborate", "explain more", "go on", "continue",
+            "more details", "give me more", "can you explain",
+            "what about it", "about it", "about that", "about him",
+            "about her", "about them", "who is he", "who is she",
+            "tell me about it", "tell me about that", "and what about",
+        ]
+
+        is_followup = any(p in q for p in followup_patterns)
+
+        # Also detect very short vague queries like just "it", "that", "him"
+        if not is_followup and len(q.split()) <= 3:
+            vague_words = {"it", "that", "this", "him", "her", "them", "more"}
+            if any(w in q.split() for w in vague_words):
+                is_followup = True
+
+        if not is_followup or not context.turns:
+            return query
+
+        # Extract the topic from the last few turns
+        topic = self._extract_last_topic(context)
+        if topic:
+            logger.info(f"[ReasoningEngine] Follow-up resolved: '{query}' → topic='{topic}'")
+            # Inject the topic into the query if it's missing
+            if topic.lower() not in q:
+                return f"{query} — regarding {topic}"
+
+        return query
+
+    def _extract_last_topic(self, context: ConversationContext) -> str:
+        """
+        Extract the main topic/subject from recent conversation turns.
+        Looks at both what the user asked and what C4 answered.
+        """
+        # Walk backwards through recent turns to find a substantive topic
+        for turn in reversed(context.turns[-5:]):
+            # Prefer the assistant's answer as it's usually more specific
+            if turn.assistant_text:
+                # Extract key entities from the response
+                resp = turn.assistant_text
+                # If the response mentions a specific person/place/thing,
+                # that's likely the topic
+                # Simple heuristic: take the first sentence's subject
+                # or use the user's original question as context
+                pass
+
+            if turn.user_text:
+                user_q = turn.user_text.strip()
+                # Skip very short/vague previous queries
+                if len(user_q.split()) >= 3:
+                    return user_q
+
+        return ""
 
     def _find_relevant_facts(self, query: str) -> List[Any]:
         """Find facts using full query and keyword-based fallback."""

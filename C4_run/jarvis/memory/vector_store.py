@@ -77,7 +77,7 @@ class MemoryEntry:
 # ---------------------------------------------------------------------------
 
 SYSTEM_SEEDS: List[Tuple[str, str, float]] = [
-    ("qwen:14b is the primary brain model for reasoning and planning.", "system", 1.0),
+    ("qwen2:7b is the primary brain model for reasoning and planning.", "system", 1.0),
     ("deepseek-coder:6.7b is used exclusively for code generation and debugging tasks.", "system", 1.0),
     ("nomic-embed-text is used for all embeddings and semantic memory operations.", "system", 1.0),
     ("C4 must never claim to have done something it has not actually done.", "system", 1.0),

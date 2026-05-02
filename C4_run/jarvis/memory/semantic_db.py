@@ -45,7 +45,7 @@ class SemanticDB:
             if not doc_vec: continue
                 
             sim = cosine_similarity(query_vec, doc_vec)
-            if sim > 0:
+            if sim > 0.6:  # Strict threshold to prevent false positives
                 results.append((sim, {"id": doc_id, **doc}))
                 
         results.sort(key=lambda x: x[0], reverse=True)

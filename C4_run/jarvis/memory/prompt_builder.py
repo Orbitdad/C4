@@ -1,11 +1,11 @@
 """
 Memory Prompt Builder for C4.
 
-Constructs the structured memory injection block for the qwen:14b system prompt.
+Constructs the structured memory injection block for the qwen2:7b system prompt.
 
 Format:
     --- RELEVANT MEMORY ---
-    • [system] qwen:14b is the primary brain model (score: 0.92)
+    • [system] qwen2:7b is the primary brain model (score: 0.92)
     • [user] Tech preference: Python, clean code (score: 0.87)
     • [task] Last task: Generated overlay.py (score: 0.71)
     ---
@@ -112,7 +112,7 @@ class MemoryPromptBuilder:
         extra_context: Optional[str] = None,
     ) -> str:
         """
-        Assemble the complete structured prompt for qwen:14b.
+        Assemble the complete structured prompt for qwen2:7b.
 
         Args:
             base_system_prompt: The C4 system identity prompt

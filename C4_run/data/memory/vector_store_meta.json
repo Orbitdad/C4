@@ -7,12 +7,13 @@
     "mem-b7d353691543",
     "mem-072ac8a72f52",
     "mem-48be83239392",
-    "mem-8e94257936b3"
+    "mem-8e94257936b3",
+    "mem-a905e01d9a80"
   ],
   "entries": {
     "mem-b07671bdf510": {
       "id": "mem-b07671bdf510",
-      "content": "qwen:14b is the primary brain model for reasoning and planning.",
+      "content": "qwen2:7b is the primary brain model for reasoning and planning.",
       "type": "system",
       "importance": 1.0,
       "timestamp": "2026-04-18T18:47:08.374103+00:00"
@@ -65,6 +66,13 @@
       "type": "system",
       "importance": 1.0,
       "timestamp": "2026-04-18T18:47:10.869983+00:00"
+    },
+    "mem-a905e01d9a80": {
+      "id": "mem-a905e01d9a80",
+      "content": "Task: who is the Prime Minister of India → Result: Code generated (228 chars). Ready to use.",
+      "type": "task",
+      "importance": 0.55,
+      "timestamp": "2026-05-01T11:05:07.973977+00:00"
     }
   },
   "dimension": 768
